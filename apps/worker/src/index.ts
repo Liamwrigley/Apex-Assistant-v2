@@ -14,6 +14,7 @@ app.use(express.json());
 /** Railway / PaaS set PORT; local dev can use WORKER_API_PORT. */
 const port = Number(process.env.PORT ?? process.env.WORKER_API_PORT ?? 4100);
 const pollMinutes = Number(process.env.INGEST_POLL_MINUTES ?? 5);
+const onlinePollMinutes = Number(process.env.INGEST_POLL_MINUTES_ONLINE ?? Math.max(1, Math.min(2, pollMinutes)));
 /** When set, poller only processes that guild; when unset, all guilds (multi-server). */
 const defaultGuildId = process.env.DISCORD_GUILD_ID?.trim() || undefined;
 const debugLogs = (process.env.DEBUG_LOGS ?? "false").toLowerCase() === "true";
@@ -45,6 +46,7 @@ app.get("/health", async (_req, res) => {
     worker: {
       workerId,
       pollMinutes,
+      onlinePollMinutes,
       leaseSeconds,
       concurrency,
       idleSleepMs
@@ -90,6 +92,7 @@ const runWorkerLoop = async (loopIndex: number) => {
     workerId,
     loopIndex,
     pollMinutes,
+    onlinePollMinutes,
     leaseSeconds
   });
   while (true) {
@@ -97,6 +100,7 @@ const runWorkerLoop = async (loopIndex: number) => {
       const next = await ingestNextDueTrackedAccount({
         guildId: defaultGuildId,
         pollMinutes,
+          onlinePollMinutes,
         leaseSeconds,
         workerId: `${workerId}-${loopIndex}`
       });

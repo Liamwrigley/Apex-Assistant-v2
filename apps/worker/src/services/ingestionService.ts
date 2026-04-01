@@ -5,6 +5,7 @@ import {
   insertRankSnapshot,
   listTrackedAccountsByGuild,
   releaseTrackedAccountClaim,
+  updateTrackedAccountIgnIfChanged,
   updateTrackedAccountLiveStats,
   updateTrackedAccountLastCheckedAt,
   upsertMatch
@@ -74,6 +75,17 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       platform: account.platform,
       externalPlayerId: account.externalPlayerId
     });
+    if (rank.playerName && rank.playerName.trim()) {
+      const didUpdateIgn = await updateTrackedAccountIgnIfChanged({
+        trackedAccountId: account.id,
+        ign: rank.playerName
+      });
+      if (didUpdateIgn) {
+        console.log(
+          `[worker] player rename detected account=${account.id} old="${account.ign}" new="${rank.playerName.trim()}"`
+        );
+      }
+    }
     await insertRankSnapshot({
       trackedAccountId: account.id,
       rankScore: rank.rankScore,
@@ -141,12 +153,14 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
 
 export async function ingestNextDueTrackedAccount(params: {
   pollMinutes: number;
+  onlinePollMinutes?: number;
   leaseSeconds: number;
   workerId: string;
   guildId?: string;
 }): Promise<{ processed: boolean; accountId?: string; failed?: boolean }> {
   const account = await claimNextDueTrackedAccount({
     pollMinutes: params.pollMinutes,
+    onlinePollMinutes: params.onlinePollMinutes,
     leaseSeconds: params.leaseSeconds,
     workerId: params.workerId,
     guildId: params.guildId

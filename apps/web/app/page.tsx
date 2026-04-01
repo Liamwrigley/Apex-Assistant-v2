@@ -552,17 +552,13 @@ export default async function HomePage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Live Presence</CardTitle>
-          <CardDescription>Realtime player activity.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {informativeRealtimeRows.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              No activity right now.
-            </p>
-          ) : (
+      {informativeRealtimeRows.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Live Presence</CardTitle>
+            <CardDescription>Realtime player activity.</CardDescription>
+          </CardHeader>
+          <CardContent>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {informativeRealtimeRows.map((row) => {
                 const iconUrl = getLegendIconUrl(row.realtimeSelectedLegend);
@@ -622,9 +618,9 @@ export default async function HomePage() {
                 );
               })}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

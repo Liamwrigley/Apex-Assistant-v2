@@ -280,13 +280,43 @@ export async function updateTrackedAccountLiveStats(params: {
   );
 }
 
+export async function updateTrackedAccountIgnIfChanged(params: {
+  trackedAccountId: string;
+  ign: string;
+}): Promise<boolean> {
+  const nextIgn = params.ign.trim();
+  if (!nextIgn) {
+    return false;
+  }
+  try {
+    const result = await pool.query<{ ign: string }>(
+      `
+      update tracked_accounts
+      set
+        ign = $2,
+        updated_at = now()
+      where id = $1
+        and ign is distinct from $2
+      returning ign
+      `,
+      [params.trackedAccountId, nextIgn]
+    );
+    return (result.rowCount ?? 0) > 0;
+  } catch {
+    // Avoid failing ingestion on rare name collisions; UUID remains canonical.
+    return false;
+  }
+}
+
 export async function claimNextDueTrackedAccount(params: {
   pollMinutes: number;
+  onlinePollMinutes?: number;
   leaseSeconds: number;
   workerId: string;
   guildId?: string;
 }): Promise<TTrackedAccount | null> {
   const pollMinutes = Math.max(1, Math.trunc(params.pollMinutes));
+  const onlinePollMinutes = Math.max(1, Math.trunc(params.onlinePollMinutes ?? Math.min(2, pollMinutes)));
   const leaseSeconds = Math.max(30, Math.trunc(params.leaseSeconds));
   const withGuildFilter = typeof params.guildId === "string" && params.guildId.length > 0;
 
@@ -297,22 +327,31 @@ export async function claimNextDueTrackedAccount(params: {
       from tracked_accounts
       where is_active = true
         and (ingest_claimed_until is null or ingest_claimed_until < now())
-        and (last_checked_at is null or last_checked_at <= now() - ($1::int * interval '1 minute'))
-        and ($2::text is null or guild_id = $2)
+        and (
+          last_checked_at is null
+          or (
+            case
+              when coalesce(realtime_is_in_game, 0) = 1 or coalesce(realtime_is_online, 0) = 1
+                then last_checked_at <= now() - ($2::int * interval '1 minute')
+              else last_checked_at <= now() - ($1::int * interval '1 minute')
+            end
+          )
+        )
+        and ($3::text is null or guild_id = $3)
       order by coalesce(last_checked_at, to_timestamp(0)) asc
       for update skip locked
       limit 1
     )
     update tracked_accounts ta
     set
-      ingest_claimed_until = now() + ($3::int * interval '1 second'),
-      ingest_claimed_by = $4,
+      ingest_claimed_until = now() + ($4::int * interval '1 second'),
+      ingest_claimed_by = $5,
       updated_at = now()
     from candidate
     where ta.id = candidate.id
     returning ${ACCOUNT_FIELDS_TA}
     `,
-    [pollMinutes, withGuildFilter ? params.guildId : null, leaseSeconds, params.workerId]
+    [pollMinutes, onlinePollMinutes, withGuildFilter ? params.guildId : null, leaseSeconds, params.workerId]
   );
   return result.rows[0] ?? null;
 }
@@ -334,13 +373,18 @@ export async function releaseTrackedAccountClaim(trackedAccountId: string, worke
 export async function getIngestionQueueStats(guildId?: string): Promise<{
   activeCount: number;
   dueCount: number;
+  dueOnlineCount: number;
+  dueOfflineCount: number;
   claimedCount: number;
 }> {
   const withGuildFilter = typeof guildId === "string" && guildId.length > 0;
   const pollMinutes = Number(process.env.INGEST_POLL_MINUTES ?? 5);
+  const onlinePollMinutes = Number(process.env.INGEST_POLL_MINUTES_ONLINE ?? Math.max(1, Math.min(2, pollMinutes)));
   const result = await pool.query<{
     activeCount: string;
     dueCount: string;
+    dueOnlineCount: string;
+    dueOfflineCount: string;
     claimedCount: string;
   }>(
     `
@@ -349,8 +393,32 @@ export async function getIngestionQueueStats(guildId?: string): Promise<{
       count(*) filter (
         where is_active = true
           and (ingest_claimed_until is null or ingest_claimed_until < now())
-          and (last_checked_at is null or last_checked_at <= now() - ($2::int * interval '1 minute'))
+          and (
+            last_checked_at is null
+            or (
+              (coalesce(realtime_is_in_game, 0) = 1 or coalesce(realtime_is_online, 0) = 1)
+              and last_checked_at <= now() - ($3::int * interval '1 minute')
+            )
+            or (
+              coalesce(realtime_is_in_game, 0) <> 1
+              and coalesce(realtime_is_online, 0) <> 1
+              and last_checked_at <= now() - ($2::int * interval '1 minute')
+            )
+          )
       )::text as "dueCount",
+      count(*) filter (
+        where is_active = true
+          and (coalesce(realtime_is_in_game, 0) = 1 or coalesce(realtime_is_online, 0) = 1)
+          and (ingest_claimed_until is null or ingest_claimed_until < now())
+          and (last_checked_at is null or last_checked_at <= now() - ($3::int * interval '1 minute'))
+      )::text as "dueOnlineCount",
+      count(*) filter (
+        where is_active = true
+          and coalesce(realtime_is_in_game, 0) <> 1
+          and coalesce(realtime_is_online, 0) <> 1
+          and (ingest_claimed_until is null or ingest_claimed_until < now())
+          and (last_checked_at is null or last_checked_at <= now() - ($2::int * interval '1 minute'))
+      )::text as "dueOfflineCount",
       count(*) filter (
         where is_active = true
           and ingest_claimed_until is not null
@@ -359,12 +427,18 @@ export async function getIngestionQueueStats(guildId?: string): Promise<{
     from tracked_accounts
     where ($1::text is null or guild_id = $1)
     `,
-    [withGuildFilter ? guildId : null, Math.max(1, Math.trunc(pollMinutes))]
+    [
+      withGuildFilter ? guildId : null,
+      Math.max(1, Math.trunc(pollMinutes)),
+      Math.max(1, Math.trunc(onlinePollMinutes))
+    ]
   );
 
   return {
     activeCount: Number(result.rows[0]?.activeCount ?? 0),
     dueCount: Number(result.rows[0]?.dueCount ?? 0),
+    dueOnlineCount: Number(result.rows[0]?.dueOnlineCount ?? 0),
+    dueOfflineCount: Number(result.rows[0]?.dueOfflineCount ?? 0),
     claimedCount: Number(result.rows[0]?.claimedCount ?? 0)
   };
 }
