@@ -1,7 +1,38 @@
-node_modules
-dist
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# Environment (never commit secrets)
 .env
-.env.local
-.next
-coverage
+.env.*
+!.env.example
+
+# Logs & debug
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE (keep shared editor config if you add it later with -f)
+.idea/
+
+# Vercel / deploy
+.vercel/
+
+# Misc
+*.local
