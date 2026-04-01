@@ -30,6 +30,9 @@ alter table tracked_accounts add column if not exists ingest_claimed_until times
 alter table tracked_accounts add column if not exists ingest_claimed_by text;
 create index if not exists idx_tracked_accounts_external_player_id on tracked_accounts (external_player_id);
 create index if not exists idx_tracked_accounts_claim on tracked_accounts (is_active, ingest_claimed_until, last_checked_at);
+create unique index if not exists uq_tracked_accounts_external_unique
+  on tracked_accounts (guild_id, platform, external_source, external_player_id)
+  where external_player_id is not null and external_source is not null;
 
 create table if not exists rank_snapshots (
   id uuid primary key default gen_random_uuid(),

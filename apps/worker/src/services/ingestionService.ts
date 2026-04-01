@@ -65,6 +65,7 @@ export async function ingestGuild(guildId: string): Promise<{ processed: number;
 }
 
 export async function ingestTrackedAccount(account: TTrackedAccount): Promise<void> {
+  const startedAt = Date.now();
   try {
     const rank = await statsProvider.getRank({
       ign: account.ign,
@@ -105,13 +106,20 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
         recordProviderHealth("match_api", false, error instanceof Error ? error.message : "Failed to fetch match details.");
       }
     }
+    console.log(
+      `[worker] player sync ok guild=${account.guildId} account=${account.id} player=${account.ign} platform=${account.platform} source=${statsProvider.name} elapsed_ms=${Date.now() - startedAt}`
+    );
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error(
+      `[worker] player sync failed guild=${account.guildId} account=${account.id} player=${account.ign} platform=${account.platform} source=${statsProvider.name} elapsed_ms=${Date.now() - startedAt} error="${message}"`
+    );
     recordProviderHealth(
       error instanceof AppError && (error.code.includes("TRN") || error.code.includes("APEX_API"))
         ? statsProvider.name
         : "match_api",
       false,
-      error instanceof Error ? error.message : "Unknown error"
+      message
     );
     throw error;
   }

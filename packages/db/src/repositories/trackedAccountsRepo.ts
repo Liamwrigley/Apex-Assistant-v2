@@ -42,6 +42,45 @@ const ACCOUNT_FIELDS_TA = `
 `;
 
 export async function addTrackedAccount(input: TTrackInsert): Promise<TTrackedAccount> {
+  const existingByExternalId =
+    input.externalPlayerId && input.externalSource
+      ? await pool.query<{ id: string }>(
+          `
+          select id
+          from tracked_accounts
+          where guild_id = $1
+            and is_active = true
+            and platform = $2
+            and external_source = $3
+            and external_player_id = $4
+          limit 1
+          `,
+          [input.guildId, input.platform, input.externalSource, input.externalPlayerId]
+        )
+      : null;
+
+  if ((existingByExternalId?.rowCount ?? 0) > 0) {
+    throw new AppError("This account is already tracked.", 409, "ACCOUNT_EXISTS");
+  }
+
+  const existingByCaseInsensitiveIgn = await pool.query<{ id: string }>(
+    `
+    select id
+    from tracked_accounts
+    where guild_id = $1
+      and owner_user_id = $2
+      and is_active = true
+      and platform = $3
+      and lower(ign) = lower($4)
+    limit 1
+    `,
+    [input.guildId, input.ownerUserId, input.platform, input.ign]
+  );
+
+  if ((existingByCaseInsensitiveIgn.rowCount ?? 0) > 0) {
+    throw new AppError("This account is already tracked.", 409, "ACCOUNT_EXISTS");
+  }
+
   try {
     const result = await pool.query<TTrackedAccount>(
       `
@@ -59,7 +98,7 @@ export async function addTrackedAccount(input: TTrackInsert): Promise<TTrackedAc
       ]
     );
     return result.rows[0];
-  } catch (error) {
+  } catch {
     throw new AppError("This account is already tracked.", 409, "ACCOUNT_EXISTS");
   }
 }
