@@ -2,6 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { AutoRefresh } from "@/components/auto-refresh";
 import { LeaderboardTable } from "@/components/leaderboard-table";
 import { getServerBaseUrl } from "@/lib/server-base-url";
+import { getDiscordBotBaseUrl, getWorkerBaseUrl } from "@/lib/service-base-urls";
 import Image from "next/image";
 
 export const dynamic = "force-dynamic";
@@ -137,18 +138,31 @@ async function fetchStats24h(guildId: string) {
   return data;
 }
 
-async function fetchServiceHealth() {
-  const workerBaseUrl = process.env.WORKER_BASE_URL ?? `http://localhost:${process.env.WORKER_API_PORT ?? 4100}`;
-  const discordBaseUrl = process.env.DISCORD_BOT_BASE_URL ?? `http://localhost:${process.env.DISCORD_BOT_PORT ?? 4300}`;
+type TServiceHealthRow = {
+  name: "worker" | "discord";
+  baseUrl: string;
+  healthUrl: string;
+  up: boolean;
+  status: number;
+  latencyMs: number;
+  body: Record<string, unknown> | null;
+};
 
-  const check = async (name: "worker" | "discord", baseUrl: string) => {
+async function fetchServiceHealth(): Promise<TServiceHealthRow[]> {
+  const workerBaseUrl = getWorkerBaseUrl();
+  const discordBaseUrl = getDiscordBotBaseUrl();
+
+  const check = async (name: "worker" | "discord", baseUrl: string): Promise<TServiceHealthRow> => {
+    const healthUrl = `${baseUrl.replace(/\/$/, "")}/health`;
     const startedAt = Date.now();
     try {
-      const response = await fetch(`${baseUrl}/health`, { cache: "no-store" });
+      const response = await fetch(healthUrl, { cache: "no-store" });
       const latencyMs = Date.now() - startedAt;
       const body = response.ok ? ((await response.json()) as Record<string, unknown>) : null;
       return {
         name,
+        baseUrl,
+        healthUrl,
         up: response.ok,
         status: response.status,
         latencyMs,
@@ -157,6 +171,8 @@ async function fetchServiceHealth() {
     } catch {
       return {
         name,
+        baseUrl,
+        healthUrl,
         up: false,
         status: 0,
         latencyMs: Date.now() - startedAt,
@@ -166,6 +182,19 @@ async function fetchServiceHealth() {
   };
 
   return Promise.all([check("worker", workerBaseUrl), check("discord", discordBaseUrl)]);
+}
+
+function healthStatusTooltip(row: TServiceHealthRow | undefined): string | undefined {
+  if (!row) {
+    return undefined;
+  }
+  const origin = row.baseUrl.replace(/\/$/, "");
+  const detail = row.up ? `${row.latencyMs} ms · HTTP ${row.status}` : "Unreachable or error";
+  const lines = [`GET ${row.healthUrl}`, detail, `Base: ${origin}`];
+  if (row.name === "worker") {
+    lines.push(`Sync Now: POST ${origin}/ingest/{guildId}`);
+  }
+  return lines.join("\n");
 }
 
 export default async function HomePage() {
@@ -230,7 +259,10 @@ export default async function HomePage() {
           </div>
           <div className="flex items-center gap-3">
             <div className="text-muted-foreground flex items-center gap-3 text-xs">
-              <span className="inline-flex items-center gap-1.5">
+              <span
+                className="inline-flex cursor-help items-center gap-1.5"
+                title={healthStatusTooltip(workerHealth)}
+              >
                 <span
                   className={`inline-block h-2 w-2 rounded-full ${workerHealth?.up ? "bg-emerald-400" : "bg-rose-400"}`}
                 />
@@ -257,7 +289,10 @@ export default async function HomePage() {
                   ) : null}
                 </span>
               </span>
-              <span className="inline-flex items-center gap-1.5">
+              <span
+                className="inline-flex cursor-help items-center gap-1.5"
+                title={healthStatusTooltip(discordHealth)}
+              >
                 <span
                   className={`inline-block h-2 w-2 rounded-full ${discordHealth?.up ? "bg-emerald-400" : "bg-rose-400"}`}
                 />

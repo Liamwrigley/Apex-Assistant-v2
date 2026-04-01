@@ -2,6 +2,7 @@ import { AppError } from "@apex-assistant/core";
 import { NextResponse } from "next/server";
 import { debugLog } from "@/app/api/_lib/log";
 import { toApiError } from "@/app/api/_lib/responses";
+import { getWorkerBaseUrl } from "@/lib/service-base-urls";
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
@@ -12,7 +13,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     debugLog("sync-now", "request", { guildId });
-    const workerBaseUrl = process.env.WORKER_BASE_URL ?? `http://localhost:${process.env.WORKER_API_PORT ?? 4100}`;
+    const workerBaseUrl = getWorkerBaseUrl();
     const secret = process.env.APP_SHARED_SECRET;
     const response = await fetch(`${workerBaseUrl}/ingest/${encodeURIComponent(guildId)}`, {
       method: "POST",
