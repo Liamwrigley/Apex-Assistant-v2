@@ -1,6 +1,7 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm install && npm run build -w @apex-assistant/discord-bot"
+# Workspace packages must compile before apps (main points at dist/*.js).
+buildCommand = "npm install && npm run build -w @apex-assistant/core && npm run build -w @apex-assistant/db && npm run build -w @apex-assistant/discord-bot"
 
 [deploy]
 startCommand = "npm run start -w @apex-assistant/discord-bot"

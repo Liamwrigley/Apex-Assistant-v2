@@ -8,9 +8,10 @@
   ],
   "scripts": {
     "build": "npm run build -w @apex-assistant/core && npm run build -w @apex-assistant/db && npm run build -w @apex-assistant/web -w @apex-assistant/worker -w @apex-assistant/discord-bot --if-present",
-    "build:web": "npm run build -w @apex-assistant/web",
-    "build:worker": "npm run build -w @apex-assistant/worker",
-    "build:discord": "npm run build -w @apex-assistant/discord-bot",
+    "build:packages": "npm run build -w @apex-assistant/core && npm run build -w @apex-assistant/db",
+    "build:web": "npm run build:packages && npm run build -w @apex-assistant/web",
+    "build:worker": "npm run build:packages && npm run build -w @apex-assistant/worker",
+    "build:discord": "npm run build:packages && npm run build -w @apex-assistant/discord-bot",
     "dev": "npm run dev --workspaces --if-present",
     "dev:web": "npm run dev -w @apex-assistant/web",
     "dev:worker": "npm run dev -w @apex-assistant/worker",

@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm install && npm run build -w @apex-assistant/worker"
+buildCommand = "npm install && npm run build -w @apex-assistant/core && npm run build -w @apex-assistant/db && npm run build -w @apex-assistant/worker"
 
 [deploy]
 startCommand = "npm run start -w @apex-assistant/worker"
