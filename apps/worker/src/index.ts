@@ -14,7 +14,8 @@ app.use(express.json());
 /** Railway / PaaS set PORT; local dev can use WORKER_API_PORT. */
 const port = Number(process.env.PORT ?? process.env.WORKER_API_PORT ?? 4100);
 const pollMinutes = Number(process.env.INGEST_POLL_MINUTES ?? 5);
-const defaultGuildId = process.env.DISCORD_GUILD_ID;
+/** When set, poller only processes that guild; when unset, all guilds (multi-server). */
+const defaultGuildId = process.env.DISCORD_GUILD_ID?.trim() || undefined;
 const debugLogs = (process.env.DEBUG_LOGS ?? "false").toLowerCase() === "true";
 const workerId = process.env.WORKER_ID ?? `worker-${randomUUID().slice(0, 8)}`;
 const leaseSeconds = Number(process.env.INGEST_CLAIM_LEASE_SECONDS ?? Math.max(120, pollMinutes * 60));
@@ -81,36 +82,34 @@ app.listen(port, "0.0.0.0", () => {
   console.log(`Worker API listening on 0.0.0.0:${port}`);
 });
 
-if (defaultGuildId) {
-  const sleep = (ms: number) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+const sleep = (ms: number) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 
-  const runWorkerLoop = async (loopIndex: number) => {
-    workerLog("per-player worker loop start", {
-      guildId: defaultGuildId,
-      workerId,
-      loopIndex,
-      pollMinutes,
-      leaseSeconds
-    });
-    while (true) {
-      try {
-        const next = await ingestNextDueTrackedAccount({
-          guildId: defaultGuildId,
-          pollMinutes,
-          leaseSeconds,
-          workerId: `${workerId}-${loopIndex}`
-        });
-        if (!next.processed) {
-          await sleep(idleSleepMs);
-        }
-      } catch (error) {
-        console.error("Per-player ingestion loop failed", error);
+const runWorkerLoop = async (loopIndex: number) => {
+  workerLog("per-player worker loop start", {
+    guildId: defaultGuildId ?? "(all guilds)",
+    workerId,
+    loopIndex,
+    pollMinutes,
+    leaseSeconds
+  });
+  while (true) {
+    try {
+      const next = await ingestNextDueTrackedAccount({
+        guildId: defaultGuildId,
+        pollMinutes,
+        leaseSeconds,
+        workerId: `${workerId}-${loopIndex}`
+      });
+      if (!next.processed) {
         await sleep(idleSleepMs);
       }
+    } catch (error) {
+      console.error("Per-player ingestion loop failed", error);
+      await sleep(idleSleepMs);
     }
-  };
-
-  for (let i = 0; i < concurrency; i += 1) {
-    void runWorkerLoop(i);
   }
+};
+
+for (let i = 0; i < concurrency; i += 1) {
+  void runWorkerLoop(i);
 }

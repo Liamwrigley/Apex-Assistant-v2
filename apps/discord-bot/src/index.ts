@@ -11,7 +11,6 @@ import {
   addTrackedAccount,
   countTrackedByGuild,
   countTrackedByOwner,
-  getLatestRankSnapshotByGuild,
   listTrackedAccountsByOwner,
   pool,
   searchTrackedAccountsByOwner,
@@ -59,6 +58,15 @@ const selectCache = new Map<
   }
 >();
 
+/**
+ * Slash command access (guild context):
+ * - /track add — any member; adds to their own list (per-user + per-guild caps).
+ * - /track list — any member; shows only that member’s tracked accounts.
+ * - /track remove — account owner OR server Administrator; removes one tracked row by id.
+ * - /dashboard — any member; posts the public web dashboard URL.
+ */
+const DEFAULT_DASHBOARD_URL = "https://apex-assistant-v2-web-one.vercel.app";
+
 const commands = [
   new SlashCommandBuilder()
     .setName("track")
@@ -94,35 +102,8 @@ const commands = [
     )
     .addSubcommand((sub) => sub.setName("list").setDescription("List your tracked accounts.")),
   new SlashCommandBuilder()
-    .setName("rank")
-    .setDescription("Show latest cached rank for an account.")
-    .addStringOption((opt) => opt.setName("ign").setDescription("In-game name").setRequired(true))
-    .addStringOption((opt) =>
-      opt
-        .setName("platform")
-        .setDescription("Platform")
-        .setRequired(true)
-        .addChoices(
-          { name: "origin", value: "origin" },
-          { name: "psn", value: "psn" },
-          { name: "xbl", value: "xbl" }
-        )
-    ),
-  new SlashCommandBuilder().setName("ranks").setDescription("Show leaderboard from latest snapshots."),
-  new SlashCommandBuilder()
-    .setName("ingest")
-    .setDescription("Ingestion controls.")
-    .addSubcommand((sub) =>
-      sub
-        .setName("now")
-        .setDescription("Trigger ingestion for this guild (admin only).")
-        .addStringOption((opt) =>
-          opt
-            .setName("guild_id")
-            .setDescription("Optional override guild id (defaults to current guild)")
-            .setRequired(false)
-        )
-    )
+    .setName("dashboard")
+    .setDescription("Get the link to the Apex Assistant web dashboard.")
 ].map((command) => command.toJSON());
 
 async function registerCommands(): Promise<void> {
@@ -260,35 +241,15 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
   await interaction.reply(message);
 }
 
-async function handleRank(interaction: ChatInputCommandInteraction): Promise<void> {
-  const ign = interaction.options.getString("ign", true);
-  const platform = interaction.options.getString("platform", true);
+async function handleDashboard(interaction: ChatInputCommandInteraction): Promise<void> {
   const effectiveGuildId = interaction.guildId ?? guildId ?? "dm";
-  limiter.assertAllowed(`${effectiveGuildId}:${interaction.user.id}:rank`);
-
-  const result = await pool.query<{
-    rankScore: number;
-    rankName: string;
-    capturedAt: Date;
-  }>(
-    `
-    select rs.rank_score as "rankScore", rs.rank_name as "rankName", rs.captured_at as "capturedAt"
-    from rank_snapshots rs
-    join tracked_accounts ta on ta.id = rs.tracked_account_id
-    where ta.guild_id = $1 and ta.ign = $2 and ta.platform = $3
-    order by rs.captured_at desc
-    limit 1
-    `,
-    [effectiveGuildId, ign, platform]
-  );
-
-  if (result.rowCount === 0) {
-    await interaction.reply("No cached rank snapshot found yet. Ingestion may still be running.");
-    return;
-  }
-
-  const row = result.rows[0];
-  await interaction.reply(`${ign} (${platform}) -> ${row.rankName} [${row.rankScore}]`);
+  limiter.assertAllowed(`${effectiveGuildId}:${interaction.user.id}:dashboard`);
+  const raw = (process.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL).trim();
+  const url = raw.replace(/\/$/, "");
+  await interaction.reply({
+    content: `**Apex Assistant dashboard**\n${url}`,
+    allowedMentions: { parse: [] }
+  });
 }
 
 async function handleTrackAddSelection(interaction: StringSelectMenuInteraction): Promise<void> {
@@ -371,65 +332,6 @@ async function handleTrackRemoveAutocomplete(interaction: AutocompleteInteractio
   );
 }
 
-async function handleRanks(interaction: ChatInputCommandInteraction): Promise<void> {
-  const effectiveGuildId = interaction.guildId ?? guildId ?? "dm";
-  limiter.assertAllowed(`${effectiveGuildId}:${interaction.user.id}:ranks`);
-  const rows = await getLatestRankSnapshotByGuild(effectiveGuildId);
-
-  if (rows.length === 0) {
-    await interaction.reply("No leaderboard snapshots yet.");
-    return;
-  }
-
-  const response = rows
-    .sort((a, b) => b.rankScore - a.rankScore)
-    .slice(0, 20)
-    .map((row, index) => `${index + 1}. ${row.ign} (${row.platform}) - ${row.rankName} [${row.rankScore}]`)
-    .join("\n");
-  await interaction.reply(response);
-}
-
-async function handleIngest(interaction: ChatInputCommandInteraction): Promise<void> {
-  const subcommand = interaction.options.getSubcommand();
-  if (subcommand !== "now") {
-    throw new AppError("Unsupported ingest subcommand.", 400, "BAD_REQUEST");
-  }
-
-  const isAdmin = interaction.memberPermissions?.has("Administrator") ?? false;
-  if (!isAdmin) {
-    throw new AppError("Only server admins can run ingest now.", 403, "FORBIDDEN");
-  }
-
-  const effectiveGuildId = interaction.options.getString("guild_id", false) ?? interaction.guildId ?? guildId ?? "dm";
-  limiter.assertAllowed(`${effectiveGuildId}:${interaction.user.id}:ingest:now`);
-
-  await interaction.deferReply({ ephemeral: true });
-  const workerBaseUrl = process.env.WORKER_BASE_URL ?? `http://localhost:${process.env.WORKER_API_PORT ?? 4100}`;
-  const secret = process.env.APP_SHARED_SECRET;
-
-  const response = await fetch(`${workerBaseUrl}/ingest/${encodeURIComponent(effectiveGuildId)}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(secret ? { "x-app-secret": secret } : {})
-    }
-  });
-
-  if (!response.ok) {
-    const bodyText = await response.text();
-    throw new AppError(
-      `Worker ingest failed with ${response.status}: ${bodyText.slice(0, 160)}`,
-      response.status,
-      "INGEST_TRIGGER_FAILED"
-    );
-  }
-
-  const body = (await response.json()) as { processed?: number };
-  await interaction.editReply(
-    `Ingest triggered for guild \`${effectiveGuildId}\`. Processed accounts: ${body.processed ?? 0}.`
-  );
-}
-
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 function isUnknownInteractionError(error: unknown): boolean {
@@ -474,16 +376,8 @@ client.on("interactionCreate", async (interaction) => {
       await handleTrack(interaction);
       return;
     }
-    if (interaction.commandName === "rank") {
-      await handleRank(interaction);
-      return;
-    }
-    if (interaction.commandName === "ranks") {
-      await handleRanks(interaction);
-      return;
-    }
-    if (interaction.commandName === "ingest") {
-      await handleIngest(interaction);
+    if (interaction.commandName === "dashboard") {
+      await handleDashboard(interaction);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

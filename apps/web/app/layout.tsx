@@ -8,7 +8,11 @@ const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
   title: "Apex Assistant",
-  description: "Apex Assistant tracker dashboard"
+  description: "Apex Assistant tracker dashboard",
+  icons: {
+    icon: [{ url: "/logo.png", type: "image/png" }],
+    apple: [{ url: "/logo.png", type: "image/png" }]
+  }
 };
 
 export default function RootLayout(props: { children: ReactNode }) {
