@@ -1,7 +1,12 @@
+import {
+  getLeaderboardWithDelta24h,
+  getRankMovers24h,
+  getRankTimelinesByTrackedAccountIds,
+  listTrackedAccounts
+} from "@apex-assistant/db";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { LeaderboardTable } from "@/components/leaderboard-table";
-import { getServerBaseUrl } from "@/lib/server-base-url";
 import { getDiscordBotBaseUrl, getWorkerBaseUrl } from "@/lib/service-base-urls";
 import Image from "next/image";
 
@@ -47,95 +52,84 @@ function formatRelativeTime(input: string): string {
   return `${years}y ago`;
 }
 
-async function fetchLeaderboard() {
-  const guildId = process.env.DISCORD_GUILD_ID ?? "";
-  const query = guildId ? `?guildId=${encodeURIComponent(guildId)}` : "";
+type TTrackedRow = {
+  id: string;
+  ign: string;
+  platform: string;
+  ownerUserId: string;
+  ownerDisplayName?: string | null;
+  externalPlayerId: string | null;
+  createdAt: string;
+  lastCheckedAt: string | null;
+};
 
-  const response = await fetch(
-    `${getServerBaseUrl()}/api/leaderboard${query}`,
-    { next: { revalidate: 60 } }
-  );
+type TLeaderboardRow = {
+  trackedAccountId: string;
+  ign: string;
+  platform: string;
+  rankScore: number;
+  rankName: string;
+  deltaRp24h: number | null;
+};
 
-  if (!response.ok) {
-    pageLog("leaderboard fetch failed", { status: response.status, guildId });
-    return [];
-  }
-  const data = (await response.json()) as Array<{
-    trackedAccountId: string;
-    ign: string;
-    platform: string;
-    rankScore: number;
-    rankName: string;
-    deltaRp24h: number | null;
-  }>;
-  pageLog("leaderboard fetch ok", { guildId, count: data.length });
-  return data;
+function toIso(d: Date | string): string {
+  return d instanceof Date ? d.toISOString() : String(d);
 }
 
-async function fetchTracked(guildId: string) {
-  const query = guildId ? `?guildId=${encodeURIComponent(guildId)}` : "";
-  const response = await fetch(
-    `${getServerBaseUrl()}/api/tracked${query}`,
-    { next: { revalidate: 60 } }
-  );
-  if (!response.ok) {
-    pageLog("tracked fetch failed", { status: response.status, guildId });
-    return [];
-  }
-  const data = (await response.json()) as Array<{
-    id: string;
-    ign: string;
-    platform: string;
-    ownerUserId: string;
-    ownerDisplayName?: string | null;
-    externalPlayerId: string | null;
-    createdAt: string;
-    lastCheckedAt: string | null;
-  }>;
-  pageLog("tracked fetch ok", { guildId, count: data.length });
-  return data;
-}
-
-async function fetchLeaderboardTimelines(guildId: string) {
-  const query = guildId ? `?guildId=${encodeURIComponent(guildId)}&hours=168` : "?hours=168";
-  const response = await fetch(
-    `${getServerBaseUrl()}/api/leaderboard/timelines${query}`,
-    { next: { revalidate: 60 } }
-  );
-  if (!response.ok) {
-    pageLog("leaderboard timelines fetch failed", { status: response.status, guildId });
-    return {} as Record<string, Array<{ capturedAt: string; rankScore: number }>>;
-  }
-  const data = (await response.json()) as Record<string, Array<{ capturedAt: string; rankScore: number }>>;
-  pageLog("leaderboard timelines fetch ok", { players: Object.keys(data).length });
-  return data;
-}
-
-async function fetchStats24h(guildId: string) {
-  const query = guildId ? `?guildId=${encodeURIComponent(guildId)}` : "";
-  const response = await fetch(
-    `${getServerBaseUrl()}/api/stats/24h${query}`,
-    { next: { revalidate: 60 } }
-  );
-  if (!response.ok) {
-    pageLog("stats24h fetch failed", { status: response.status, guildId });
-    return {
-      highestGainer: null,
-      biggestLoser: null
-    } as {
-      highestGainer: { ign: string; platform: string; deltaRp: number } | null;
-      biggestLoser: { ign: string; platform: string; deltaRp: number } | null;
-    };
-  }
-  const data = (await response.json()) as {
+async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
+  leaderboard: TLeaderboardRow[];
+  tracked: TTrackedRow[];
+  timelines: Record<string, Array<{ capturedAt: string; rankScore: number }>>;
+  stats24h: {
     highestGainer: { ign: string; platform: string; deltaRp: number } | null;
     biggestLoser: { ign: string; platform: string; deltaRp: number } | null;
   };
-  pageLog("stats24h fetch ok", {
-    hasGainer: Boolean(data.highestGainer),
-    hasLoser: Boolean(data.biggestLoser)
+}> {
+  const [leaderboardRows, trackedAccounts, stats24h] = await Promise.all([
+    getLeaderboardWithDelta24h(guildFilter),
+    listTrackedAccounts(guildFilter),
+    getRankMovers24h(guildFilter)
+  ]);
+
+  const leaderboard = [...leaderboardRows]
+    .sort((a, b) => b.rankScore - a.rankScore)
+    .map((r) => ({
+      trackedAccountId: r.trackedAccountId,
+      ign: r.ign,
+      platform: r.platform,
+      rankScore: r.rankScore,
+      rankName: r.rankName,
+      deltaRp24h: r.deltaRp24h
+    }));
+
+  const trackedIds = leaderboard.map((r) => r.trackedAccountId);
+  const timelinesRaw = await getRankTimelinesByTrackedAccountIds(trackedIds, 168);
+  const timelines: Record<string, Array<{ capturedAt: string; rankScore: number }>> = {};
+  for (const [tid, pts] of Object.entries(timelinesRaw)) {
+    timelines[tid] = pts.map((p) => ({
+      capturedAt: toIso(p.capturedAt),
+      rankScore: p.rankScore
+    }));
+  }
+
+  const tracked: TTrackedRow[] = trackedAccounts.map((row) => ({
+    id: row.id,
+    ign: row.ign,
+    platform: row.platform,
+    ownerUserId: row.ownerUserId,
+    ownerDisplayName: row.ownerDisplayName ?? null,
+    externalPlayerId: row.externalPlayerId,
+    createdAt: toIso(row.createdAt),
+    lastCheckedAt: row.lastCheckedAt ? toIso(row.lastCheckedAt) : null
+  }));
+
+  pageLog("dashboard db load", {
+    guildFilter: guildFilter ?? null,
+    leaderboardCount: leaderboard.length,
+    trackedCount: tracked.length
   });
-  return data;
+
+  return { leaderboard, tracked, timelines, stats24h };
 }
 
 type TServiceHealthRow = {
@@ -199,11 +193,9 @@ function healthStatusTooltip(row: TServiceHealthRow | undefined): string | undef
 
 export default async function HomePage() {
   const guildId = process.env.DISCORD_GUILD_ID ?? "";
-  pageLog("render start", { guildId, webBaseUrl: getServerBaseUrl() });
-  const leaderboard = await fetchLeaderboard();
-  const tracked = await fetchTracked(guildId);
-  const timelines = await fetchLeaderboardTimelines(guildId);
-  const stats24h = await fetchStats24h(guildId);
+  const guildFilter = guildId.length > 0 ? guildId : undefined;
+  pageLog("render start", { guildId, guildFilter: guildFilter ?? "all guilds" });
+  const { leaderboard, tracked, timelines, stats24h } = await loadDashboardFromDb(guildFilter);
   const serviceHealth = await fetchServiceHealth();
   const workerHealth = serviceHealth.find((item) => item.name === "worker");
   const discordHealth = serviceHealth.find((item) => item.name === "discord");
@@ -221,19 +213,7 @@ export default async function HomePage() {
       acc[ownerKey].push(row);
       return acc;
     },
-    {} as Record<
-      string,
-      Array<{
-        id: string;
-        ign: string;
-        platform: string;
-        ownerUserId: string;
-        ownerDisplayName?: string | null;
-        externalPlayerId: string | null;
-        createdAt: string;
-        lastCheckedAt: string | null;
-      }>
-    >
+    {} as Record<string, TTrackedRow[]>
   );
   const averageRp =
     leaderboard.length === 0
@@ -392,7 +372,11 @@ export default async function HomePage() {
         </CardHeader>
         <CardContent>
           {leaderboard.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No leaderboard data yet. Run ingestion to populate snapshots.</p>
+            <p className="text-muted-foreground text-sm">
+              {tracked.length > 0
+                ? "No rank snapshots yet for these tracked accounts. Run a sync from the worker so leaderboard rows appear (leaderboard only lists players with at least one snapshot)."
+                : "No leaderboard data yet. Track accounts and run ingestion to populate snapshots."}
+            </p>
           ) : (
             <LeaderboardTable rows={leaderboard} timelines={timelines} />
           )}
