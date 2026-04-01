@@ -11,7 +11,8 @@ dotenv.config({ path: resolve(process.cwd(), "../../.env") });
 const app = express();
 app.use(express.json());
 
-const port = Number(process.env.WORKER_API_PORT ?? 4100);
+/** Railway / PaaS set PORT; local dev can use WORKER_API_PORT. */
+const port = Number(process.env.PORT ?? process.env.WORKER_API_PORT ?? 4100);
 const pollMinutes = Number(process.env.INGEST_POLL_MINUTES ?? 5);
 const defaultGuildId = process.env.DISCORD_GUILD_ID;
 const debugLogs = (process.env.DEBUG_LOGS ?? "false").toLowerCase() === "true";
@@ -29,11 +30,17 @@ function workerLog(message: string, meta?: Record<string, unknown>) {
 }
 
 app.get("/health", async (_req, res) => {
-  const queue = await getIngestionQueueStats(defaultGuildId);
-  res.json({
+  let queue: Awaited<ReturnType<typeof getIngestionQueueStats>> | null = null;
+  try {
+    queue = await getIngestionQueueStats(defaultGuildId);
+  } catch {
+    // Liveness must stay 200 for Railway; DB can be checked separately in logs/metrics.
+  }
+  res.status(200).json({
     ok: true,
     providers: getProviderHealth(),
     queue,
+    dbReachable: queue !== null,
     worker: {
       workerId,
       pollMinutes,
@@ -70,8 +77,8 @@ app.post("/webhook/matches", async (req, res) => {
   res.status(202).json({ accepted: true, received: req.body ? 1 : 0 });
 });
 
-app.listen(port, () => {
-  console.log(`Worker API listening on :${port}`);
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Worker API listening on 0.0.0.0:${port}`);
 });
 
 if (defaultGuildId) {

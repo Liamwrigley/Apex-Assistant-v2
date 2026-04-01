@@ -46,7 +46,8 @@ const limiter = new SlidingWindowLimiter(
   Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60000),
   Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? 60)
 );
-const healthPort = Number(process.env.DISCORD_BOT_PORT ?? 4300);
+/** Railway / PaaS set PORT; local dev can use DISCORD_BOT_PORT. */
+const healthPort = Number(process.env.PORT ?? process.env.DISCORD_BOT_PORT ?? 4300);
 const statsProvider = getStatsProvider();
 const selectCache = new Map<
   string,
@@ -511,14 +512,17 @@ registerCommands()
     process.exit(1);
   });
 
+const healthPath = (url: string | undefined) => (url ?? "").split("?")[0];
+
 createServer((req, res) => {
-  if (req.url === "/health") {
+  const path = healthPath(req.url);
+  if (path === "/health" || path === "/health/") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ ok: true, service: "discord-bot" }));
     return;
   }
   res.writeHead(404, { "content-type": "application/json" });
   res.end(JSON.stringify({ ok: false }));
-}).listen(healthPort, () => {
-  console.log(`Discord health endpoint listening on :${healthPort}`);
+}).listen(healthPort, "0.0.0.0", () => {
+  console.log(`Discord health endpoint listening on 0.0.0.0:${healthPort}`);
 });
