@@ -1,4 +1,4 @@
-import { type TRankSnapshot } from "@apex-assistant/core";
+import { type TPlayerStatSnapshot, type TRankSnapshot } from "@apex-assistant/core";
 import { pool } from "../client.js";
 
 type TSnapshotInsert = {
@@ -8,6 +8,14 @@ type TSnapshotInsert = {
   rankDivision: string | null;
   iconUrl: string | null;
   source: string;
+};
+
+type TPlayerStatsSnapshotInsert = {
+  trackedAccountId: string;
+  currentLevel: number | null;
+  careerKills: number | null;
+  careerDamage: number | null;
+  careerWins: number | null;
 };
 
 export async function insertRankSnapshot(input: TSnapshotInsert): Promise<TRankSnapshot> {
@@ -26,6 +34,25 @@ export async function insertRankSnapshot(input: TSnapshotInsert): Promise<TRankS
       source
     `,
     [input.trackedAccountId, input.rankScore, input.rankName, input.rankDivision, input.iconUrl, input.source]
+  );
+  return result.rows[0];
+}
+
+export async function insertPlayerStatsSnapshot(input: TPlayerStatsSnapshotInsert): Promise<TPlayerStatSnapshot> {
+  const result = await pool.query<TPlayerStatSnapshot>(
+    `
+    insert into player_stat_snapshots (tracked_account_id, current_level, career_kills, career_damage, career_wins)
+    values ($1, $2, $3, $4, $5)
+    returning
+      id,
+      tracked_account_id as "trackedAccountId",
+      captured_at as "capturedAt",
+      current_level as "currentLevel",
+      career_kills as "careerKills",
+      career_damage as "careerDamage",
+      career_wins as "careerWins"
+    `,
+    [input.trackedAccountId, input.currentLevel, input.careerKills, input.careerDamage, input.careerWins]
   );
   return result.rows[0];
 }

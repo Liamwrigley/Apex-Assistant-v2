@@ -114,13 +114,29 @@ const commands = [
     .setDescription("Get the link to the Apex Assistant web dashboard.")
 ].map((command) => command.toJSON());
 
-async function registerCommands(): Promise<void> {
+/**
+ * Guild commands apply immediately. Global commands can take up to ~1 hour to show in clients,
+ * which is why we prefer guild registration whenever we know the guild id(s).
+ */
+async function syncSlashCommandsWithDiscord(): Promise<void> {
   const rest = new REST({ version: "10" }).setToken(token as string);
-  if (guildId) {
-    await rest.put(Routes.applicationGuildCommands(clientId as string, guildId), { body: commands });
+  const id = clientId as string;
+  const singleGuild = guildId?.trim();
+
+  if (singleGuild) {
+    await rest.put(Routes.applicationCommands(id), { body: [] });
+    await rest.put(Routes.applicationGuildCommands(id, singleGuild), { body: commands });
+    console.log(`[discord] Slash commands synced for guild ${singleGuild}.`);
     return;
   }
-  await rest.put(Routes.applicationCommands(clientId as string), { body: commands });
+
+  await rest.put(Routes.applicationCommands(id), { body: [] });
+  let count = 0;
+  for (const g of client.guilds.cache.values()) {
+    await rest.put(Routes.applicationGuildCommands(id, g.id), { body: commands });
+    count += 1;
+  }
+  console.log(`[discord] Slash commands synced in ${count} guild(s) (guild-scoped, immediate).`);
 }
 
 async function handleTrack(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -452,12 +468,27 @@ client.on("error", (error) => {
   console.error("Discord client error event:", error);
 });
 
-registerCommands()
-  .then(() => client.login(token))
-  .catch((error: unknown) => {
-    console.error("Discord boot failed", error);
-    process.exit(1);
+client.once("ready", () => {
+  void syncSlashCommandsWithDiscord().catch((error: unknown) => {
+    console.error("[discord] Slash command sync failed", error);
   });
+});
+
+client.on("guildCreate", (guild) => {
+  if (guildId?.trim()) {
+    return;
+  }
+  const rest = new REST({ version: "10" }).setToken(token as string);
+  void rest
+    .put(Routes.applicationGuildCommands(clientId as string, guild.id), { body: commands })
+    .then(() => console.log(`[discord] Slash commands synced for new guild ${guild.id}.`))
+    .catch((error: unknown) => console.error("[discord] Slash sync for new guild failed", error));
+});
+
+void client.login(token).catch((error: unknown) => {
+  console.error("Discord boot failed", error);
+  process.exit(1);
+});
 
 const healthPath = (url: string | undefined) => (url ?? "").split("?")[0];
 

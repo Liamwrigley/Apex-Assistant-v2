@@ -28,6 +28,17 @@ alter table tracked_accounts add column if not exists external_player_id text;
 alter table tracked_accounts add column if not exists external_source text;
 alter table tracked_accounts add column if not exists ingest_claimed_until timestamptz;
 alter table tracked_accounts add column if not exists ingest_claimed_by text;
+alter table tracked_accounts add column if not exists current_level integer;
+alter table tracked_accounts add column if not exists realtime_lobby_state text;
+alter table tracked_accounts add column if not exists realtime_is_online integer;
+alter table tracked_accounts add column if not exists realtime_is_in_game integer;
+alter table tracked_accounts add column if not exists realtime_can_join integer;
+alter table tracked_accounts add column if not exists realtime_party_full integer;
+alter table tracked_accounts add column if not exists realtime_selected_legend text;
+alter table tracked_accounts add column if not exists realtime_current_state text;
+alter table tracked_accounts add column if not exists realtime_current_state_as_text text;
+alter table tracked_accounts add column if not exists realtime_current_state_since_timestamp bigint;
+alter table tracked_accounts add column if not exists realtime_updated_at timestamptz;
 create index if not exists idx_tracked_accounts_external_player_id on tracked_accounts (external_player_id);
 create index if not exists idx_tracked_accounts_claim on tracked_accounts (is_active, ingest_claimed_until, last_checked_at);
 create unique index if not exists uq_tracked_accounts_external_unique
@@ -46,6 +57,19 @@ create table if not exists rank_snapshots (
 );
 
 create index if not exists idx_rank_snapshots_account_captured on rank_snapshots (tracked_account_id, captured_at desc);
+
+create table if not exists player_stat_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  tracked_account_id uuid not null references tracked_accounts(id) on delete cascade,
+  captured_at timestamptz not null default now(),
+  current_level integer,
+  career_kills integer,
+  career_damage integer,
+  career_wins integer
+);
+
+create index if not exists idx_player_stat_snapshots_account_captured
+  on player_stat_snapshots (tracked_account_id, captured_at desc);
 
 create table if not exists matches (
   id uuid primary key default gen_random_uuid(),

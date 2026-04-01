@@ -1,9 +1,11 @@
 import { AppError, getStatsProvider, type TTrackedAccount } from "@apex-assistant/core";
 import {
   claimNextDueTrackedAccount,
+  insertPlayerStatsSnapshot,
   insertRankSnapshot,
   listTrackedAccountsByGuild,
   releaseTrackedAccountClaim,
+  updateTrackedAccountLiveStats,
   updateTrackedAccountLastCheckedAt,
   upsertMatch
 } from "@apex-assistant/db";
@@ -79,6 +81,18 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       rankDivision: rank.rankDivision,
       iconUrl: rank.iconUrl,
       source: statsProvider.name
+    });
+    await insertPlayerStatsSnapshot({
+      trackedAccountId: account.id,
+      currentLevel: rank.currentLevel ?? null,
+      careerKills: rank.careerKills ?? null,
+      careerDamage: rank.careerDamage ?? null,
+      careerWins: rank.careerWins ?? null
+    });
+    await updateTrackedAccountLiveStats({
+      trackedAccountId: account.id,
+      currentLevel: rank.currentLevel ?? null,
+      realtime: rank.realtime ?? null
     });
     await updateTrackedAccountLastCheckedAt(account.id);
     recordProviderHealth(statsProvider.name, true);

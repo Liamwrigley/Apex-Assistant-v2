@@ -10,6 +10,21 @@ export type TStatsRank = {
   iconUrl: string | null;
   externalPlayerId?: string | null;
   playerName?: string | null;
+  currentLevel?: number | null;
+  careerKills?: number | null;
+  careerDamage?: number | null;
+  careerWins?: number | null;
+  realtime?: {
+    lobbyState?: string | null;
+    isOnline?: number | null;
+    isInGame?: number | null;
+    canJoin?: number | null;
+    partyFull?: number | null;
+    selectedLegend?: string | null;
+    currentState?: string | null;
+    currentStateSinceTimestamp?: number | null;
+    currentStateAsText?: string | null;
+  };
 };
 
 export type TStatsSearchCandidate = TTrnSearchCandidate;
@@ -124,12 +139,29 @@ async function fetchApexLegendsApiProfile(input: {
     global?: {
       name?: string;
       uid?: string | number;
+      level?: number;
       rank?: {
         rankScore?: number;
         rankName?: string;
         rankDiv?: number | string;
         rankImg?: string;
       };
+    };
+    total?: {
+      career_kills?: { value?: number } | number;
+      damage?: { value?: number } | number;
+      career_wins?: { value?: number } | number;
+    };
+    realtime?: {
+      lobbyState?: string;
+      isOnline?: number;
+      isInGame?: number;
+      canJoin?: number;
+      partyFull?: number;
+      selectedLegend?: string;
+      currentState?: string;
+      currentStateSinceTimestamp?: number;
+      currentStateAsText?: string;
     };
   };
 
@@ -146,6 +178,15 @@ async function fetchApexLegendsApiProfile(input: {
     payload.global?.uid !== undefined && payload.global?.uid !== null
       ? String(payload.global.uid)
       : null;
+  const toTotalNumber = (value: { value?: number } | number | undefined): number | null => {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null;
+    }
+    if (value && typeof value.value === "number" && Number.isFinite(value.value)) {
+      return value.value;
+    }
+    return null;
+  };
   return {
     rank: {
       rankScore: rank.rankScore,
@@ -153,7 +194,25 @@ async function fetchApexLegendsApiProfile(input: {
       rankDivision: rank.rankDiv !== undefined ? String(rank.rankDiv) : null,
       iconUrl: rank.rankImg ?? null,
       externalPlayerId,
-      playerName: payload.global?.name ?? null
+      playerName: payload.global?.name ?? null,
+      currentLevel: typeof payload.global?.level === "number" ? payload.global.level : null,
+      careerKills: toTotalNumber(payload.total?.career_kills),
+      careerDamage: toTotalNumber(payload.total?.damage),
+      careerWins: toTotalNumber(payload.total?.career_wins),
+      realtime: {
+        lobbyState: payload.realtime?.lobbyState ?? null,
+        isOnline: typeof payload.realtime?.isOnline === "number" ? payload.realtime.isOnline : null,
+        isInGame: typeof payload.realtime?.isInGame === "number" ? payload.realtime.isInGame : null,
+        canJoin: typeof payload.realtime?.canJoin === "number" ? payload.realtime.canJoin : null,
+        partyFull: typeof payload.realtime?.partyFull === "number" ? payload.realtime.partyFull : null,
+        selectedLegend: payload.realtime?.selectedLegend ?? null,
+        currentState: payload.realtime?.currentState ?? null,
+        currentStateSinceTimestamp:
+          typeof payload.realtime?.currentStateSinceTimestamp === "number"
+            ? payload.realtime.currentStateSinceTimestamp
+            : null,
+        currentStateAsText: payload.realtime?.currentStateAsText ?? null
+      }
     },
     externalPlayerId
   };

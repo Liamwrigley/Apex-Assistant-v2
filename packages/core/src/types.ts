@@ -24,6 +24,27 @@ export type TTrackedAccount = {
   createdAt: Date;
   updatedAt: Date;
   lastCheckedAt: Date | null;
+  currentLevel: number | null;
+  realtimeLobbyState: string | null;
+  realtimeIsOnline: number | null;
+  realtimeIsInGame: number | null;
+  realtimeCanJoin: number | null;
+  realtimePartyFull: number | null;
+  realtimeSelectedLegend: string | null;
+  realtimeCurrentState: string | null;
+  realtimeCurrentStateAsText: string | null;
+  realtimeCurrentStateSinceTimestamp: number | null;
+  realtimeUpdatedAt: Date | null;
+};
+
+export type TPlayerStatSnapshot = {
+  id: string;
+  trackedAccountId: string;
+  capturedAt: Date;
+  currentLevel: number | null;
+  careerKills: number | null;
+  careerDamage: number | null;
+  careerWins: number | null;
 };
 
 export type TMatch = {

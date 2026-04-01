@@ -22,7 +22,18 @@ const ACCOUNT_FIELDS = `
   is_active as "isActive",
   created_at as "createdAt",
   updated_at as "updatedAt",
-  last_checked_at as "lastCheckedAt"
+  last_checked_at as "lastCheckedAt",
+  current_level as "currentLevel",
+  realtime_lobby_state as "realtimeLobbyState",
+  realtime_is_online as "realtimeIsOnline",
+  realtime_is_in_game as "realtimeIsInGame",
+  realtime_can_join as "realtimeCanJoin",
+  realtime_party_full as "realtimePartyFull",
+  realtime_selected_legend as "realtimeSelectedLegend",
+  realtime_current_state as "realtimeCurrentState",
+  realtime_current_state_as_text as "realtimeCurrentStateAsText",
+  realtime_current_state_since_timestamp as "realtimeCurrentStateSinceTimestamp",
+  realtime_updated_at as "realtimeUpdatedAt"
 `;
 
 /** Same shape as ACCOUNT_FIELDS but qualified for UPDATE ... FROM (avoids ambiguous "id" in RETURNING). */
@@ -218,6 +229,55 @@ export async function updateTrackedAccountLastCheckedAt(trackedAccountId: string
   if (result.rowCount === 0) {
     console.warn(`[db] updateTrackedAccountLastCheckedAt: no row matched id=${trackedAccountId}`);
   }
+}
+
+export async function updateTrackedAccountLiveStats(params: {
+  trackedAccountId: string;
+  currentLevel?: number | null;
+  realtime?: {
+    lobbyState?: string | null;
+    isOnline?: number | null;
+    isInGame?: number | null;
+    canJoin?: number | null;
+    partyFull?: number | null;
+    selectedLegend?: string | null;
+    currentState?: string | null;
+    currentStateAsText?: string | null;
+    currentStateSinceTimestamp?: number | null;
+  } | null;
+}): Promise<void> {
+  await pool.query(
+    `
+    update tracked_accounts
+    set
+      current_level = $2,
+      realtime_lobby_state = $3,
+      realtime_is_online = $4,
+      realtime_is_in_game = $5,
+      realtime_can_join = $6,
+      realtime_party_full = $7,
+      realtime_selected_legend = $8,
+      realtime_current_state = $9,
+      realtime_current_state_as_text = $10,
+      realtime_current_state_since_timestamp = $11,
+      realtime_updated_at = now(),
+      updated_at = now()
+    where id = $1
+    `,
+    [
+      params.trackedAccountId,
+      params.currentLevel ?? null,
+      params.realtime?.lobbyState ?? null,
+      params.realtime?.isOnline ?? null,
+      params.realtime?.isInGame ?? null,
+      params.realtime?.canJoin ?? null,
+      params.realtime?.partyFull ?? null,
+      params.realtime?.selectedLegend ?? null,
+      params.realtime?.currentState ?? null,
+      params.realtime?.currentStateAsText ?? null,
+      params.realtime?.currentStateSinceTimestamp ?? null
+    ]
+  );
 }
 
 export async function claimNextDueTrackedAccount(params: {
