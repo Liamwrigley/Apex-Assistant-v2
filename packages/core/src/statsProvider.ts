@@ -9,6 +9,7 @@ export type TStatsRank = {
   rankDivision: string | null;
   iconUrl: string | null;
   externalPlayerId?: string | null;
+  playerName?: string | null;
 };
 
 export type TStatsSearchCandidate = TTrnSearchCandidate;
@@ -121,6 +122,7 @@ async function fetchApexLegendsApiProfile(input: {
   const payload = (await response.json()) as {
     Error?: string;
     global?: {
+      name?: string;
       uid?: string | number;
       rank?: {
         rankScore?: number;
@@ -150,7 +152,8 @@ async function fetchApexLegendsApiProfile(input: {
       rankName: rank.rankName,
       rankDivision: rank.rankDiv !== undefined ? String(rank.rankDiv) : null,
       iconUrl: rank.rankImg ?? null,
-      externalPlayerId
+      externalPlayerId,
+      playerName: payload.global?.name ?? null
     },
     externalPlayerId
   };

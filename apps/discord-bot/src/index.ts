@@ -79,13 +79,21 @@ const commands = [
         .addStringOption((opt) =>
           opt
             .setName("platform")
-            .setDescription("Platform")
+            .setDescription("Platform (PC, PS4, X1)")
             .setRequired(false)
             .addChoices(
-              { name: "origin", value: "origin" },
-              { name: "psn", value: "psn" },
-              { name: "xbl", value: "xbl" }
+              { name: "PC (Origin/Steam)", value: "origin" },
+              { name: "PS4 (PlayStation)", value: "psn" },
+              { name: "X1 (Xbox)", value: "xbl" }
             )
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("add-uid")
+        .setDescription("Track an account directly by provider UUID (auto-detect platform).")
+        .addStringOption((opt) =>
+          opt.setName("uid").setDescription("Provider UUID (external player id)").setRequired(true)
         )
     )
     .addSubcommand((sub) =>
@@ -121,10 +129,11 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
   const userId = interaction.user.id;
   limiter.assertAllowed(`${effectiveGuildId}:${userId}:track:${subcommand}`);
 
-  if (subcommand === "add") {
+  if (subcommand === "add" || subcommand === "add-uid") {
     await interaction.deferReply({ ephemeral: true });
-    const query = interaction.options.getString("query", true);
     const platform = interaction.options.getString("platform", false) as TPlatform | null;
+    const query = subcommand === "add" ? interaction.options.getString("query", true) : null;
+    const uid = subcommand === "add-uid" ? interaction.options.getString("uid", true).trim() : null;
 
     const maxByUser = Number(process.env.MAX_TRACKED_ACCOUNTS_PER_USER ?? 5);
     const maxByGuild = Number(process.env.MAX_TRACKED_ACCOUNTS_PER_GUILD ?? 100);
@@ -138,8 +147,52 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
       throw new AppError("Guild tracking limit reached.", 400, "GUILD_LIMIT");
     }
 
+    if (subcommand === "add-uid") {
+      if (!uid) {
+        throw new AppError("uid is required for /track add-uid.", 400, "UID_REQUIRED");
+      }
+
+      const probePlatforms: TPlatform[] = platform ? [platform] : ["origin", "psn", "xbl"];
+      let resolvedPlatform: TPlatform | null = null;
+      let resolvedIgn: string | null = null;
+      for (const probe of probePlatforms) {
+        try {
+          const rank = await statsProvider.getRank({
+            ign: uid,
+            platform: probe,
+            externalPlayerId: uid
+          });
+          resolvedPlatform = probe;
+          resolvedIgn = (rank.playerName ?? "").trim() || uid;
+          break;
+        } catch {
+          // Probe next platform
+        }
+      }
+      if (!resolvedPlatform || !resolvedIgn) {
+        throw new AppError("Could not resolve this uid on PC/PS4/X1.", 404, "UID_NOT_FOUND");
+      }
+
+      await upsertUser({
+        discordUserId: userId,
+        displayName: interaction.user.globalName ?? interaction.user.username
+      });
+      const created = await addTrackedAccount({
+        guildId: effectiveGuildId,
+        ownerUserId: userId,
+        ign: resolvedIgn,
+        platform: resolvedPlatform,
+        externalPlayerId: uid,
+        externalSource: statsProvider.name
+      });
+      await interaction.editReply(
+        `Now tracking ${created.ign} (${created.platform}) via uid \`${uid}\` with id \`${created.id}\`.`
+      );
+      return;
+    }
+
     const candidates = await statsProvider.searchPlayers({
-      query,
+      query: query ?? "",
       platform: platform ?? undefined
     });
 

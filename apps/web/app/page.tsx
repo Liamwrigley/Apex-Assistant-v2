@@ -396,7 +396,14 @@ export default async function HomePage() {
               {Object.entries(trackedByOwner).map(([ownerName, accounts]) => (
                 <div key={ownerName} className="overflow-x-auto rounded-lg border">
                   <div className="bg-muted/40 px-3 py-2 text-sm font-medium">{ownerName}</div>
-                  <table className="w-full text-sm">
+                  <table className="w-full table-fixed text-sm">
+                    <colgroup>
+                      <col className="w-[22%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[26%]" />
+                      <col className="w-[24%]" />
+                      <col className="w-[16%]" />
+                    </colgroup>
                     <thead className="bg-muted/20">
                       <tr className="text-left">
                         <th className="px-3 py-2 font-medium" title="Tracked player IGN">
@@ -411,7 +418,7 @@ export default async function HomePage() {
                         <th className="px-3 py-2 font-medium" title="When this tracked account was created">
                           Date Added
                         </th>
-                        <th className="px-3 py-2 font-medium" title="Last successful rank snapshot write">
+                        <th className="px-3 py-2 font-medium text-right" title="Last successful rank snapshot write">
                           Last Sync
                         </th>
                       </tr>
@@ -419,11 +426,15 @@ export default async function HomePage() {
                     <tbody>
                       {accounts.map((row) => (
                         <tr key={row.id} className="border-t">
-                          <td className="px-3 py-2 font-medium">{row.ign}</td>
-                          <td className="px-3 py-2 uppercase">{row.platform}</td>
-                          <td className="px-3 py-2 font-mono text-xs">{row.externalPlayerId ?? "-"}</td>
-                          <td className="px-3 py-2">{new Date(row.createdAt).toLocaleString()}</td>
-                          <td className="px-3 py-2">
+                          <td className="px-3 py-2 font-medium truncate" title={row.ign}>
+                            {row.ign}
+                          </td>
+                          <td className="px-3 py-2 uppercase whitespace-nowrap">{row.platform}</td>
+                          <td className="px-3 py-2 font-mono text-xs truncate" title={row.externalPlayerId ?? "-"}>
+                            {row.externalPlayerId ?? "-"}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap">{new Date(row.createdAt).toLocaleString()}</td>
+                          <td className="px-3 py-2 text-right whitespace-nowrap">
                             {row.lastCheckedAt ? (
                               <span title={new Date(row.lastCheckedAt).toLocaleString()}>
                                 {formatRelativeTime(row.lastCheckedAt)}
