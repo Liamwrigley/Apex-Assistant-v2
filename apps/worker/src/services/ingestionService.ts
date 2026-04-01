@@ -75,7 +75,12 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       platform: account.platform,
       externalPlayerId: account.externalPlayerId
     });
-    if (rank.playerName && rank.playerName.trim()) {
+    const canRenameFromProfile =
+      Boolean(account.externalPlayerId) &&
+      Boolean(rank.externalPlayerId) &&
+      String(account.externalPlayerId) === String(rank.externalPlayerId);
+
+    if (canRenameFromProfile && rank.playerName && rank.playerName.trim()) {
       const didUpdateIgn = await updateTrackedAccountIgnIfChanged({
         trackedAccountId: account.id,
         ign: rank.playerName
