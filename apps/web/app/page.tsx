@@ -1,6 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { LeaderboardTable } from "@/components/leaderboard-table";
+import { getServerBaseUrl } from "@/lib/server-base-url";
 import Image from "next/image";
 
 export const dynamic = "force-dynamic";
@@ -50,7 +51,7 @@ async function fetchLeaderboard() {
   const query = guildId ? `?guildId=${encodeURIComponent(guildId)}` : "";
 
   const response = await fetch(
-    `${process.env.WEB_BASE_URL ?? "http://localhost:3000"}/api/leaderboard${query}`,
+    `${getServerBaseUrl()}/api/leaderboard${query}`,
     { next: { revalidate: 60 } }
   );
 
@@ -73,7 +74,7 @@ async function fetchLeaderboard() {
 async function fetchTracked(guildId: string) {
   const query = guildId ? `?guildId=${encodeURIComponent(guildId)}` : "";
   const response = await fetch(
-    `${process.env.WEB_BASE_URL ?? "http://localhost:3000"}/api/tracked${query}`,
+    `${getServerBaseUrl()}/api/tracked${query}`,
     { next: { revalidate: 60 } }
   );
   if (!response.ok) {
@@ -97,7 +98,7 @@ async function fetchTracked(guildId: string) {
 async function fetchLeaderboardTimelines(guildId: string) {
   const query = guildId ? `?guildId=${encodeURIComponent(guildId)}&hours=168` : "?hours=168";
   const response = await fetch(
-    `${process.env.WEB_BASE_URL ?? "http://localhost:3000"}/api/leaderboard/timelines${query}`,
+    `${getServerBaseUrl()}/api/leaderboard/timelines${query}`,
     { next: { revalidate: 60 } }
   );
   if (!response.ok) {
@@ -112,7 +113,7 @@ async function fetchLeaderboardTimelines(guildId: string) {
 async function fetchStats24h(guildId: string) {
   const query = guildId ? `?guildId=${encodeURIComponent(guildId)}` : "";
   const response = await fetch(
-    `${process.env.WEB_BASE_URL ?? "http://localhost:3000"}/api/stats/24h${query}`,
+    `${getServerBaseUrl()}/api/stats/24h${query}`,
     { next: { revalidate: 60 } }
   );
   if (!response.ok) {
@@ -169,7 +170,7 @@ async function fetchServiceHealth() {
 
 export default async function HomePage() {
   const guildId = process.env.DISCORD_GUILD_ID ?? "";
-  pageLog("render start", { guildId, webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3000" });
+  pageLog("render start", { guildId, webBaseUrl: getServerBaseUrl() });
   const leaderboard = await fetchLeaderboard();
   const tracked = await fetchTracked(guildId);
   const timelines = await fetchLeaderboardTimelines(guildId);
