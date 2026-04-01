@@ -25,6 +25,22 @@ const ACCOUNT_FIELDS = `
   last_checked_at as "lastCheckedAt"
 `;
 
+/** Same shape as ACCOUNT_FIELDS but qualified for UPDATE ... FROM (avoids ambiguous "id" in RETURNING). */
+const ACCOUNT_FIELDS_TA = `
+  ta.id,
+  ta.guild_id as "guildId",
+  ta.owner_user_id as "ownerUserId",
+  (select display_name from users u where u.discord_user_id = ta.owner_user_id) as "ownerDisplayName",
+  ta.ign,
+  ta.platform,
+  ta.external_player_id as "externalPlayerId",
+  ta.external_source as "externalSource",
+  ta.is_active as "isActive",
+  ta.created_at as "createdAt",
+  ta.updated_at as "updatedAt",
+  ta.last_checked_at as "lastCheckedAt"
+`;
+
 export async function addTrackedAccount(input: TTrackInsert): Promise<TTrackedAccount> {
   try {
     const result = await pool.query<TTrackedAccount>(
@@ -195,7 +211,7 @@ export async function claimNextDueTrackedAccount(params: {
       updated_at = now()
     from candidate
     where ta.id = candidate.id
-    returning ${ACCOUNT_FIELDS}
+    returning ${ACCOUNT_FIELDS_TA}
     `,
     [pollMinutes, withGuildFilter ? params.guildId : null, leaseSeconds, params.workerId]
   );
