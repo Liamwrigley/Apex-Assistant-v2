@@ -1,0 +1,32 @@
+{
+  "name": "apex-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @apex-assistant/core && npm run build -w @apex-assistant/db && npm run build -w @apex-assistant/web -w @apex-assistant/worker -w @apex-assistant/discord-bot --if-present",
+    "build:web": "npm run build -w @apex-assistant/web",
+    "build:worker": "npm run build -w @apex-assistant/worker",
+    "build:discord": "npm run build -w @apex-assistant/discord-bot",
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:web": "npm run dev -w @apex-assistant/web",
+    "dev:worker": "npm run dev -w @apex-assistant/worker",
+    "dev:discord": "npm run dev -w @apex-assistant/discord-bot",
+    "lint": "npm run lint --workspaces --if-present",
+    "start": "npm run start --workspaces --if-present",
+    "start:web": "npm run start -w @apex-assistant/web",
+    "start:worker": "npm run start -w @apex-assistant/worker",
+    "start:discord": "npm run start -w @apex-assistant/discord-bot"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "dotenv": "^16.6.1",
+    "typescript": "^5.8.3"
+  }
+}

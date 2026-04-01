@@ -1,0 +1,524 @@
+import dotenv from "dotenv";
+import { resolve } from "node:path";
+import {
+  AppError,
+  SlidingWindowLimiter,
+  assertOwnerOrAdmin,
+  getStatsProvider,
+  type TPlatform
+} from "@apex-assistant/core";
+import {
+  addTrackedAccount,
+  countTrackedByGuild,
+  countTrackedByOwner,
+  getLatestRankSnapshotByGuild,
+  listTrackedAccountsByOwner,
+  pool,
+  searchTrackedAccountsByOwner,
+  upsertUser
+} from "@apex-assistant/db";
+import {
+  ActionRowBuilder,
+  AutocompleteInteraction,
+  ChatInputCommandInteraction,
+  Client,
+  DiscordAPIError,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction
+} from "discord.js";
+import { createServer } from "node:http";
+
+dotenv.config({ path: resolve(process.cwd(), "../../.env") });
+
+const token = process.env.DISCORD_TOKEN;
+const clientId = process.env.DISCORD_CLIENT_ID;
+const guildId = process.env.DISCORD_GUILD_ID;
+
+if (!token || !clientId) {
+  throw new Error("Missing DISCORD_TOKEN or DISCORD_CLIENT_ID");
+}
+
+const limiter = new SlidingWindowLimiter(
+  Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60000),
+  Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? 60)
+);
+const healthPort = Number(process.env.DISCORD_BOT_PORT ?? 4300);
+const statsProvider = getStatsProvider();
+const selectCache = new Map<
+  string,
+  {
+    guildId: string;
+    ownerUserId: string;
+    expiresAt: number;
+    options: Array<{ ign: string; platform: TPlatform; label: string; externalPlayerId?: string | null }>;
+  }
+>();
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName("track")
+    .setDescription("Manage tracked Apex accounts.")
+    .addSubcommand((sub) =>
+      sub
+        .setName("add")
+        .setDescription("Find and track your account.")
+        .addStringOption((opt) => opt.setName("query").setDescription("Name to search").setRequired(true))
+        .addStringOption((opt) =>
+          opt
+            .setName("platform")
+            .setDescription("Platform")
+            .setRequired(false)
+            .addChoices(
+              { name: "origin", value: "origin" },
+              { name: "psn", value: "psn" },
+              { name: "xbl", value: "xbl" }
+            )
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("remove")
+        .setDescription("Remove one of your tracked accounts.")
+        .addStringOption((opt) =>
+          opt
+            .setName("id")
+            .setDescription("Tracked account id")
+            .setRequired(true)
+            .setAutocomplete(true)
+        )
+    )
+    .addSubcommand((sub) => sub.setName("list").setDescription("List your tracked accounts.")),
+  new SlashCommandBuilder()
+    .setName("rank")
+    .setDescription("Show latest cached rank for an account.")
+    .addStringOption((opt) => opt.setName("ign").setDescription("In-game name").setRequired(true))
+    .addStringOption((opt) =>
+      opt
+        .setName("platform")
+        .setDescription("Platform")
+        .setRequired(true)
+        .addChoices(
+          { name: "origin", value: "origin" },
+          { name: "psn", value: "psn" },
+          { name: "xbl", value: "xbl" }
+        )
+    ),
+  new SlashCommandBuilder().setName("ranks").setDescription("Show leaderboard from latest snapshots."),
+  new SlashCommandBuilder()
+    .setName("ingest")
+    .setDescription("Ingestion controls.")
+    .addSubcommand((sub) =>
+      sub
+        .setName("now")
+        .setDescription("Trigger ingestion for this guild (admin only).")
+        .addStringOption((opt) =>
+          opt
+            .setName("guild_id")
+            .setDescription("Optional override guild id (defaults to current guild)")
+            .setRequired(false)
+        )
+    )
+].map((command) => command.toJSON());
+
+async function registerCommands(): Promise<void> {
+  const rest = new REST({ version: "10" }).setToken(token as string);
+  if (guildId) {
+    await rest.put(Routes.applicationGuildCommands(clientId as string, guildId), { body: commands });
+    return;
+  }
+  await rest.put(Routes.applicationCommands(clientId as string), { body: commands });
+}
+
+async function handleTrack(interaction: ChatInputCommandInteraction): Promise<void> {
+  const subcommand = interaction.options.getSubcommand();
+  const effectiveGuildId = interaction.guildId ?? guildId ?? "dm";
+  const userId = interaction.user.id;
+  limiter.assertAllowed(`${effectiveGuildId}:${userId}:track:${subcommand}`);
+
+  if (subcommand === "add") {
+    await interaction.deferReply({ ephemeral: true });
+    const query = interaction.options.getString("query", true);
+    const platform = interaction.options.getString("platform", false) as TPlatform | null;
+
+    const maxByUser = Number(process.env.MAX_TRACKED_ACCOUNTS_PER_USER ?? 5);
+    const maxByGuild = Number(process.env.MAX_TRACKED_ACCOUNTS_PER_GUILD ?? 100);
+    const ownerCount = await countTrackedByOwner(effectiveGuildId, userId);
+    const guildCount = await countTrackedByGuild(effectiveGuildId);
+
+    if (ownerCount >= maxByUser) {
+      throw new AppError("You reached your tracked account limit.", 400, "USER_LIMIT");
+    }
+    if (guildCount >= maxByGuild) {
+      throw new AppError("Guild tracking limit reached.", 400, "GUILD_LIMIT");
+    }
+
+    const candidates = await statsProvider.searchPlayers({
+      query,
+      platform: platform ?? undefined
+    });
+
+    if (candidates.length === 0) {
+      await interaction.editReply({
+        content:
+          statsProvider.name === "trn"
+            ? "No TRN candidates found. Try another query or specify a platform."
+            : "No candidates found from ApexLegendsAPI. Try exact name or specify platform.",
+        components: []
+      });
+      return;
+    }
+
+    if (candidates.length === 1) {
+      const candidate = candidates[0];
+      await upsertUser({
+        discordUserId: userId,
+        displayName: interaction.user.globalName ?? interaction.user.username
+      });
+      const created = await addTrackedAccount({
+        guildId: effectiveGuildId,
+        ownerUserId: userId,
+        ign: candidate.handle,
+        platform: candidate.platform,
+        externalPlayerId: candidate.externalPlayerId ?? null,
+        externalSource: statsProvider.name
+      });
+      await interaction.editReply(`Now tracking ${created.ign} (${created.platform}) with id \`${created.id}\`.`);
+      return;
+    }
+
+    const selectId = `track-add:${interaction.id}`;
+    selectCache.set(selectId, {
+      guildId: effectiveGuildId,
+      ownerUserId: userId,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      options: candidates.map((candidate) => ({
+        ign: candidate.handle,
+        platform: candidate.platform,
+        label: `${candidate.displayName} (${candidate.platform})`,
+        externalPlayerId: candidate.externalPlayerId ?? null
+      }))
+    });
+
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId(selectId)
+      .setPlaceholder("Select the account to track")
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(
+        candidates.slice(0, 25).map((candidate, index) => ({
+          label: `${candidate.displayName}`.slice(0, 90),
+          description: `${candidate.platform} | ${candidate.handle}`.slice(0, 90),
+          value: String(index)
+        }))
+      );
+    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+
+    await interaction.editReply({
+      content: "I found multiple matches. Pick the correct account:",
+      components: [row]
+    });
+    return;
+  }
+
+  if (subcommand === "remove") {
+    const id = interaction.options.getString("id", true);
+    const existing = await pool.query<{ ownerUserId: string }>(
+      "select owner_user_id as \"ownerUserId\" from tracked_accounts where id = $1 and guild_id = $2",
+      [id, effectiveGuildId]
+    );
+    if (existing.rowCount === 0) {
+      throw new AppError("Tracked account not found.", 404, "NOT_FOUND");
+    }
+
+    assertOwnerOrAdmin({
+      ownerUserId: existing.rows[0].ownerUserId,
+      requesterUserId: userId,
+      isAdmin: interaction.memberPermissions?.has("Administrator") ?? false
+    });
+
+    await pool.query("delete from tracked_accounts where id = $1", [id]);
+    await interaction.reply(`Removed tracked account \`${id}\`.`);
+    return;
+  }
+
+  const rows = await listTrackedAccountsByOwner(effectiveGuildId, userId);
+  const message =
+    rows.length === 0
+      ? "You are not tracking any accounts yet."
+      : rows
+          .map(
+            (row) =>
+              `- \`${row.id}\` ${row.ign} (${row.platform})` +
+              (row.externalPlayerId ? ` uid:${row.externalPlayerId}` : "")
+          )
+          .join("\n");
+  await interaction.reply(message);
+}
+
+async function handleRank(interaction: ChatInputCommandInteraction): Promise<void> {
+  const ign = interaction.options.getString("ign", true);
+  const platform = interaction.options.getString("platform", true);
+  const effectiveGuildId = interaction.guildId ?? guildId ?? "dm";
+  limiter.assertAllowed(`${effectiveGuildId}:${interaction.user.id}:rank`);
+
+  const result = await pool.query<{
+    rankScore: number;
+    rankName: string;
+    capturedAt: Date;
+  }>(
+    `
+    select rs.rank_score as "rankScore", rs.rank_name as "rankName", rs.captured_at as "capturedAt"
+    from rank_snapshots rs
+    join tracked_accounts ta on ta.id = rs.tracked_account_id
+    where ta.guild_id = $1 and ta.ign = $2 and ta.platform = $3
+    order by rs.captured_at desc
+    limit 1
+    `,
+    [effectiveGuildId, ign, platform]
+  );
+
+  if (result.rowCount === 0) {
+    await interaction.reply("No cached rank snapshot found yet. Ingestion may still be running.");
+    return;
+  }
+
+  const row = result.rows[0];
+  await interaction.reply(`${ign} (${platform}) -> ${row.rankName} [${row.rankScore}]`);
+}
+
+async function handleTrackAddSelection(interaction: StringSelectMenuInteraction): Promise<void> {
+  const cached = selectCache.get(interaction.customId);
+  if (!cached || cached.expiresAt < Date.now()) {
+    await interaction.update({
+      content: "This selection expired. Run `/track add` again.",
+      components: []
+    });
+    return;
+  }
+
+  if (cached.ownerUserId !== interaction.user.id) {
+    await interaction.reply({
+      content: "Only the original requester can use this selector.",
+      ephemeral: true
+    });
+    return;
+  }
+
+  const index = Number(interaction.values[0]);
+  const selected = cached.options[index];
+  if (!selected) {
+    await interaction.update({
+      content: "Invalid selection. Run `/track add` again.",
+      components: []
+    });
+    return;
+  }
+
+  const maxByUser = Number(process.env.MAX_TRACKED_ACCOUNTS_PER_USER ?? 5);
+  const maxByGuild = Number(process.env.MAX_TRACKED_ACCOUNTS_PER_GUILD ?? 100);
+  const ownerCount = await countTrackedByOwner(cached.guildId, interaction.user.id);
+  const guildCount = await countTrackedByGuild(cached.guildId);
+  if (ownerCount >= maxByUser) {
+    throw new AppError("You reached your tracked account limit.", 400, "USER_LIMIT");
+  }
+  if (guildCount >= maxByGuild) {
+    throw new AppError("Guild tracking limit reached.", 400, "GUILD_LIMIT");
+  }
+
+  const created = await addTrackedAccount({
+    guildId: cached.guildId,
+    ownerUserId: interaction.user.id,
+    ign: selected.ign,
+    platform: selected.platform,
+    externalPlayerId: selected.externalPlayerId ?? null,
+    externalSource: statsProvider.name
+  });
+  await upsertUser({
+    discordUserId: interaction.user.id,
+    displayName: interaction.user.globalName ?? interaction.user.username
+  });
+  selectCache.delete(interaction.customId);
+  await interaction.update({
+    content: `Now tracking ${created.ign} (${created.platform}) with id \`${created.id}\`.`,
+    components: []
+  });
+}
+
+async function handleTrackRemoveAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
+  if (interaction.commandName !== "track" || interaction.options.getSubcommand() !== "remove") {
+    await interaction.respond([]);
+    return;
+  }
+
+  const focused = interaction.options.getFocused(true);
+  const effectiveGuildId = interaction.guildId ?? guildId ?? "dm";
+  const rows = await searchTrackedAccountsByOwner({
+    guildId: effectiveGuildId,
+    ownerUserId: interaction.user.id,
+    query: focused.value,
+    limit: 25
+  });
+  await interaction.respond(
+    rows.map((row) => ({
+      name: `${row.ign} (${row.platform})`,
+      value: row.id
+    }))
+  );
+}
+
+async function handleRanks(interaction: ChatInputCommandInteraction): Promise<void> {
+  const effectiveGuildId = interaction.guildId ?? guildId ?? "dm";
+  limiter.assertAllowed(`${effectiveGuildId}:${interaction.user.id}:ranks`);
+  const rows = await getLatestRankSnapshotByGuild(effectiveGuildId);
+
+  if (rows.length === 0) {
+    await interaction.reply("No leaderboard snapshots yet.");
+    return;
+  }
+
+  const response = rows
+    .sort((a, b) => b.rankScore - a.rankScore)
+    .slice(0, 20)
+    .map((row, index) => `${index + 1}. ${row.ign} (${row.platform}) - ${row.rankName} [${row.rankScore}]`)
+    .join("\n");
+  await interaction.reply(response);
+}
+
+async function handleIngest(interaction: ChatInputCommandInteraction): Promise<void> {
+  const subcommand = interaction.options.getSubcommand();
+  if (subcommand !== "now") {
+    throw new AppError("Unsupported ingest subcommand.", 400, "BAD_REQUEST");
+  }
+
+  const isAdmin = interaction.memberPermissions?.has("Administrator") ?? false;
+  if (!isAdmin) {
+    throw new AppError("Only server admins can run ingest now.", 403, "FORBIDDEN");
+  }
+
+  const effectiveGuildId = interaction.options.getString("guild_id", false) ?? interaction.guildId ?? guildId ?? "dm";
+  limiter.assertAllowed(`${effectiveGuildId}:${interaction.user.id}:ingest:now`);
+
+  await interaction.deferReply({ ephemeral: true });
+  const workerBaseUrl = process.env.WORKER_BASE_URL ?? `http://localhost:${process.env.WORKER_API_PORT ?? 4100}`;
+  const secret = process.env.APP_SHARED_SECRET;
+
+  const response = await fetch(`${workerBaseUrl}/ingest/${encodeURIComponent(effectiveGuildId)}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(secret ? { "x-app-secret": secret } : {})
+    }
+  });
+
+  if (!response.ok) {
+    const bodyText = await response.text();
+    throw new AppError(
+      `Worker ingest failed with ${response.status}: ${bodyText.slice(0, 160)}`,
+      response.status,
+      "INGEST_TRIGGER_FAILED"
+    );
+  }
+
+  const body = (await response.json()) as { processed?: number };
+  await interaction.editReply(
+    `Ingest triggered for guild \`${effectiveGuildId}\`. Processed accounts: ${body.processed ?? 0}.`
+  );
+}
+
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+function isUnknownInteractionError(error: unknown): boolean {
+  return error instanceof DiscordAPIError && error.code === 10062;
+}
+
+async function safeInteractionErrorResponse(
+  interaction: ChatInputCommandInteraction | StringSelectMenuInteraction,
+  message: string
+): Promise<void> {
+  try {
+    if (interaction.deferred || interaction.replied) {
+      await interaction.followUp({ content: `Error: ${message}`, ephemeral: true });
+      return;
+    }
+    await interaction.reply({ content: `Error: ${message}`, ephemeral: true });
+  } catch (error) {
+    if (!isUnknownInteractionError(error)) {
+      throw error;
+    }
+    console.warn("Dropped stale interaction response (10062).");
+  }
+}
+
+client.on("interactionCreate", async (interaction) => {
+  try {
+    if (interaction.isAutocomplete()) {
+      await handleTrackRemoveAutocomplete(interaction);
+      return;
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith("track-add:")) {
+      await handleTrackAddSelection(interaction);
+      return;
+    }
+
+    if (!interaction.isChatInputCommand()) {
+      return;
+    }
+
+    if (interaction.commandName === "track") {
+      await handleTrack(interaction);
+      return;
+    }
+    if (interaction.commandName === "rank") {
+      await handleRank(interaction);
+      return;
+    }
+    if (interaction.commandName === "ranks") {
+      await handleRanks(interaction);
+      return;
+    }
+    if (interaction.commandName === "ingest") {
+      await handleIngest(interaction);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    if (interaction.isAutocomplete()) {
+      await interaction.respond([]);
+      return;
+    }
+    if (interaction.isStringSelectMenu()) {
+      await safeInteractionErrorResponse(interaction, message);
+      return;
+    }
+    if (interaction.isChatInputCommand()) {
+      await safeInteractionErrorResponse(interaction, message);
+    }
+  }
+});
+
+client.on("error", (error) => {
+  console.error("Discord client error event:", error);
+});
+
+registerCommands()
+  .then(() => client.login(token))
+  .catch((error: unknown) => {
+    console.error("Discord boot failed", error);
+    process.exit(1);
+  });
+
+createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, service: "discord-bot" }));
+    return;
+  }
+  res.writeHead(404, { "content-type": "application/json" });
+  res.end(JSON.stringify({ ok: false }));
+}).listen(healthPort, () => {
+  console.log(`Discord health endpoint listening on :${healthPort}`);
+});
