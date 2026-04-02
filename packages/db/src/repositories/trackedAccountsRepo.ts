@@ -447,10 +447,6 @@ export async function autoLinkTrackedAccountByExactFingerprint(params: {
         and owner_user_id = $3
         and platform <> $4
         and lower(trim(ign)) = lower(trim($5))
-        and current_level is not distinct from $6
-        and career_kills is not distinct from $7
-        and career_damage is not distinct from $8
-        and career_wins is not distinct from $9
       order by created_at asc
       limit 1
       for update
@@ -460,11 +456,7 @@ export async function autoLinkTrackedAccountByExactFingerprint(params: {
         row.guildId,
         row.ownerUserId,
         row.platform,
-        row.ign,
-        row.currentLevel,
-        row.careerKills,
-        row.careerDamage,
-        row.careerWins
+        row.ign
       ]
     );
     const peer = peerResult.rows[0];
@@ -517,7 +509,7 @@ export async function autoLinkTrackedAccountByExactFingerprint(params: {
         peer.id,
         row.identityGroupId,
         resolvedGroupId,
-        "exact_owner_name_stats_platform"
+        "exact_owner_name_platform"
       ]
     );
 

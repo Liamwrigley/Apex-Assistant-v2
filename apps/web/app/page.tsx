@@ -1,5 +1,5 @@
 import { AutoRefresh } from "@/components/auto-refresh";
-import { LeaderboardTable } from "@/components/leaderboard-table";
+import { LeaderboardCard } from "@/components/leaderboard-card";
 import {
   Card,
   CardContent,
@@ -537,25 +537,7 @@ export default async function HomePage() {
         </Card>
       </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Leaderboard</CardTitle>
-          <CardDescription>
-            Latest rank snapshot by tracked account.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {leaderboard.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              {tracked.length > 0
-                ? "No rank snapshots yet for these tracked accounts. Run a sync from the worker so leaderboard rows appear (leaderboard only lists players with at least one snapshot)."
-                : "No leaderboard data yet. Track accounts and run ingestion to populate snapshots."}
-            </p>
-          ) : (
-            <LeaderboardTable rows={leaderboard} timelines={timelines} />
-          )}
-        </CardContent>
-      </Card>
+      <LeaderboardCard rows={leaderboard} timelines={timelines} trackedCount={tracked.length} />
 
       {informativeRealtimeRows.length > 0 ? (
         <Card>
@@ -619,6 +601,11 @@ export default async function HomePage() {
                         {row.realtimeCurrentStateAsText ? (
                           <span className="text-muted-foreground rounded bg-white/5 px-1.5 py-0.5 text-[10px]">
                             {row.realtimeCurrentStateAsText}
+                          </span>
+                        ) : null}
+                        {showOnline && row.realtimeLobbyState ? (
+                          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">
+                            Lobby: {row.realtimeLobbyState}
                           </span>
                         ) : null}
                         <span className="text-muted-foreground rounded bg-white/5 px-1.5 py-0.5 text-[10px]">

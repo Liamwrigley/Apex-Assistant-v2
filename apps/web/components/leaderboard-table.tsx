@@ -15,7 +15,7 @@ type TTimelinePoint = { capturedAt: string; rankScore: number };
 
 type TSortKey = "ign" | "platform" | "rankName" | "rankScore" | "deltaRp24h";
 type TSortDir = "asc" | "desc";
-type TPlatformFilter = "all" | "origin" | "psn" | "xbl";
+export type TPlatformFilter = "all" | "origin" | "psn" | "xbl";
 
 function sortIndicator(active: boolean, dir: TSortDir): string {
   if (!active) {
@@ -24,38 +24,41 @@ function sortIndicator(active: boolean, dir: TSortDir): string {
   return dir === "asc" ? " \u2191" : " \u2193";
 }
 
-export function LeaderboardTable(props: { rows: TLeaderboardRow[]; timelines: Record<string, TTimelinePoint[]> }) {
+export function toPlatformFilter(platform: string): TPlatformFilter {
+  const value = platform.toLowerCase();
+  if (value === "origin" || value === "pc") {
+    return "origin";
+  }
+  if (value === "psn" || value === "ps4") {
+    return "psn";
+  }
+  if (value === "xbl" || value === "x1") {
+    return "xbl";
+  }
+  return "all";
+}
+
+export function platformLabel(platform: string): string {
+  const normalized = toPlatformFilter(platform);
+  if (normalized === "origin") {
+    return "PC";
+  }
+  if (normalized === "psn") {
+    return "PS4";
+  }
+  if (normalized === "xbl") {
+    return "X1";
+  }
+  return platform.toUpperCase();
+}
+
+export function LeaderboardTable(props: {
+  rows: TLeaderboardRow[];
+  timelines: Record<string, TTimelinePoint[]>;
+  platformFilter: TPlatformFilter;
+}) {
   const [sortKey, setSortKey] = useState<TSortKey>("rankScore");
   const [sortDir, setSortDir] = useState<TSortDir>("desc");
-  const [platformFilter, setPlatformFilter] = useState<TPlatformFilter>("all");
-
-  function normalizePlatform(platform: string): TPlatformFilter {
-    const value = platform.toLowerCase();
-    if (value === "origin" || value === "pc") {
-      return "origin";
-    }
-    if (value === "psn" || value === "ps4") {
-      return "psn";
-    }
-    if (value === "xbl" || value === "x1") {
-      return "xbl";
-    }
-    return "all";
-  }
-
-  function platformLabel(platform: string): string {
-    const normalized = normalizePlatform(platform);
-    if (normalized === "origin") {
-      return "PC";
-    }
-    if (normalized === "psn") {
-      return "PS4";
-    }
-    if (normalized === "xbl") {
-      return "X1";
-    }
-    return platform.toUpperCase();
-  }
 
   function onSort(nextKey: TSortKey) {
     if (sortKey === nextKey) {
@@ -68,10 +71,10 @@ export function LeaderboardTable(props: { rows: TLeaderboardRow[]; timelines: Re
 
   const sortedRows = useMemo(() => {
     const data = props.rows.filter((row) => {
-      if (platformFilter === "all") {
+      if (props.platformFilter === "all") {
         return true;
       }
-      return normalizePlatform(row.platform) === platformFilter;
+      return toPlatformFilter(row.platform) === props.platformFilter;
     });
     data.sort((a, b) => {
       const direction = sortDir === "asc" ? 1 : -1;
@@ -90,23 +93,33 @@ export function LeaderboardTable(props: { rows: TLeaderboardRow[]; timelines: Re
       return a.rankName.localeCompare(b.rankName) * direction;
     });
     return data;
-  }, [platformFilter, props.rows, sortDir, sortKey]);
+  }, [props.platformFilter, props.rows, sortDir, sortKey]);
+
+  /** One shared x-axis for all visible sparklines so the same wall time lines up row-to-row. */
+  const timelineXDomain = useMemo(() => {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const row of sortedRows) {
+      const pts = props.timelines[row.trackedAccountId] ?? [];
+      for (const p of pts) {
+        const t = new Date(p.capturedAt).getTime();
+        if (Number.isFinite(t)) {
+          min = Math.min(min, t);
+          max = Math.max(max, t);
+        }
+      }
+    }
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+      return null;
+    }
+    if (min === max) {
+      return { minMs: min - 60_000, maxMs: max + 60_000 };
+    }
+    return { minMs: min, maxMs: max };
+  }, [props.timelines, sortedRows]);
 
   return (
     <div className="overflow-x-auto rounded-lg border">
-      <div className="bg-muted/20 flex items-center justify-end border-b px-3 py-2">
-        <label className="text-muted-foreground mr-2 text-xs">Platform</label>
-        <select
-          className="bg-background border-input rounded border px-2 py-1 text-xs"
-          value={platformFilter}
-          onChange={(event) => setPlatformFilter(event.target.value as TPlatformFilter)}
-        >
-          <option value="all">All</option>
-          <option value="origin">PC</option>
-          <option value="psn">PS4</option>
-          <option value="xbl">X1</option>
-        </select>
-      </div>
       <table className="w-full text-sm">
         <thead className="bg-muted/40">
           <tr className="text-left">
@@ -194,6 +207,7 @@ export function LeaderboardTable(props: { rows: TLeaderboardRow[]; timelines: Re
                     trackedAccountId={row.trackedAccountId}
                     hours={168}
                     points={props.timelines[row.trackedAccountId] ?? []}
+                    xDomain={timelineXDomain}
                   />
                 </div>
               </td>

@@ -52,14 +52,35 @@ export function evaluateRealtimePresence(
   const isInGameFlag = input.realtimeIsInGame === 1;
   const isOnlineFlag = input.realtimeIsOnline === 1;
 
+  // Online flag is the primary signal.
+  if (isOnlineFlag && isInGameFlag) {
+    return {
+      isFresh: true,
+      ageMs,
+      status: "in_game",
+      shouldShow: true,
+      reason: "online_and_in_game_flags"
+    };
+  }
+
+  if (isOnlineFlag) {
+    return {
+      isFresh: true,
+      ageMs,
+      status: "online",
+      shouldShow: true,
+      reason: "is_online_flag"
+    };
+  }
+
   const stateSuggestsOffline = includesAny(stateText, ["offline", "afk", "disconnected", "not online"]);
-  if (stateSuggestsOffline) {
+  if (!isOnlineFlag && stateSuggestsOffline) {
     return {
       isFresh: true,
       ageMs,
       status: "offline",
       shouldShow: false,
-      reason: "state_text_offline_overrides_flags"
+      reason: "state_text_offline"
     };
   }
 
@@ -74,23 +95,14 @@ export function evaluateRealtimePresence(
     };
   }
 
-  if (isInGameFlag) {
+  // In-game without online is treated as provider inconsistency; hide.
+  if (isInGameFlag && !isOnlineFlag) {
     return {
       isFresh: true,
       ageMs,
-      status: "in_game",
-      shouldShow: true,
-      reason: "is_in_game_flag"
-    };
-  }
-
-  if (isOnlineFlag) {
-    return {
-      isFresh: true,
-      ageMs,
-      status: "online",
-      shouldShow: true,
-      reason: "is_online_flag"
+      status: "offline",
+      shouldShow: false,
+      reason: "in_game_without_online_flag"
     };
   }
 

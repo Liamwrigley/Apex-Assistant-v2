@@ -7,7 +7,16 @@ type TPoint = {
   rankScore: number;
 };
 
-export function PlayerTimelineSparkline(props: { trackedAccountId: string; hours?: number; points?: TPoint[] }) {
+/** When set, x positions use absolute time so multiple charts share the same axis. */
+export type TSparklineXDomain = { minMs: number; maxMs: number };
+
+export function PlayerTimelineSparkline(props: {
+  trackedAccountId: string;
+  hours?: number;
+  points?: TPoint[];
+  /** Shared time range across leaderboard rows (ms since epoch). */
+  xDomain?: TSparklineXDomain | null;
+}) {
   const [points, setPoints] = useState<TPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -56,18 +65,32 @@ export function PlayerTimelineSparkline(props: { trackedAccountId: string; hours
 
   const dimensions = { width: 1000, height: 58, padX: 8, padY: 7 };
 
+  const sortedPoints = useMemo(() => {
+    return [...points].sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime());
+  }, [points]);
+
   const chart = useMemo(() => {
-    if (points.length < 2) {
+    if (sortedPoints.length < 2) {
       return { pathD: "", circles: [] as Array<{ x: number; y: number }>, min: 0, max: 0 };
     }
-    const values = points.map((p) => p.rankScore);
+    const values = sortedPoints.map((p) => p.rankScore);
     const min = Math.min(...values);
     const max = Math.max(...values);
     const range = Math.max(max - min, 1);
     const innerW = dimensions.width - dimensions.padX * 2;
     const innerH = dimensions.height - dimensions.padY * 2;
-    const circles = points.map((point, index) => {
-      const x = dimensions.padX + (index / (points.length - 1)) * innerW;
+    const domain = props.xDomain;
+    const spanMs =
+      domain && domain.maxMs >= domain.minMs ? Math.max(domain.maxMs - domain.minMs, 1) : 1;
+    const circles = sortedPoints.map((point, index) => {
+      let x: number;
+      if (domain && domain.maxMs >= domain.minMs && spanMs > 0) {
+        const t = new Date(point.capturedAt).getTime();
+        const u = (t - domain.minMs) / spanMs;
+        x = dimensions.padX + Math.min(1, Math.max(0, u)) * innerW;
+      } else {
+        x = dimensions.padX + (index / (sortedPoints.length - 1)) * innerW;
+      }
       const y = dimensions.padY + (1 - (point.rankScore - min) / range) * innerH;
       return { x, y };
     });
@@ -85,25 +108,31 @@ export function PlayerTimelineSparkline(props: { trackedAccountId: string; hours
     }
     const pathD = pathParts.join(" ");
     return { pathD, circles, min, max };
-  }, [points]);
+  }, [props.xDomain, sortedPoints]);
 
   if (isLoading) {
     return <div className="h-[58px] w-full min-w-[240px] animate-pulse rounded bg-muted/50" />;
   }
 
-  if (points.length < 2) {
+  if (sortedPoints.length < 2) {
     return <div className="h-[58px] w-full min-w-[240px]" />;
   }
 
-  const start = points[0]?.rankScore ?? 0;
-  const end = points[points.length - 1]?.rankScore ?? 0;
+  const start = sortedPoints[0]?.rankScore ?? 0;
+  const end = sortedPoints[sortedPoints.length - 1]?.rankScore ?? 0;
   const delta = end - start;
   const lineColor = delta >= 0 ? "#34d399" : "#fb7185";
   const dotColor = lineColor;
-  const hoverPoint = hoverIndex !== null ? points[hoverIndex] : null;
+  const hoverPoint = hoverIndex !== null ? sortedPoints[hoverIndex] : null;
   const hoverDot = hoverIndex !== null ? chart.circles[hoverIndex] : null;
-  const startTime = new Date(points[0].capturedAt).getTime();
-  const endTime = new Date(points[points.length - 1].capturedAt).getTime();
+  const startTime =
+    props.xDomain && props.xDomain.maxMs >= props.xDomain.minMs
+      ? props.xDomain.minMs
+      : new Date(sortedPoints[0].capturedAt).getTime();
+  const endTime =
+    props.xDomain && props.xDomain.maxMs >= props.xDomain.minMs
+      ? props.xDomain.maxMs
+      : new Date(sortedPoints[sortedPoints.length - 1].capturedAt).getTime();
   const startLabel = new Date(startTime).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const endLabel = new Date(endTime).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const xTicks = [
