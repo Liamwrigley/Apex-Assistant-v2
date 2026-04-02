@@ -1,6 +1,8 @@
 import { AppError, getStatsProvider, type TTrackedAccount } from "@apex-assistant/core";
 import {
+  autoLinkTrackedAccountByExactFingerprint,
   claimNextDueTrackedAccount,
+  hasIgnConflictForDifferentExternalId,
   insertPlayerStatsSnapshot,
   insertRankSnapshot,
   listTrackedAccountsByGuild,
@@ -81,14 +83,32 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       String(account.externalPlayerId) === String(rank.externalPlayerId);
 
     if (canRenameFromProfile && rank.playerName && rank.playerName.trim()) {
-      const didUpdateIgn = await updateTrackedAccountIgnIfChanged({
-        trackedAccountId: account.id,
-        ign: rank.playerName
-      });
-      if (didUpdateIgn) {
-        console.log(
-          `[worker] player rename detected account=${account.id} old="${account.ign}" new="${rank.playerName.trim()}"`
-        );
+      const nextIgn = rank.playerName.trim();
+      const isSameIgn = nextIgn.toLowerCase() === account.ign.trim().toLowerCase();
+      if (!isSameIgn) {
+        const hasCollision = await hasIgnConflictForDifferentExternalId({
+          trackedAccountId: account.id,
+          ign: nextIgn,
+          externalPlayerId: account.externalPlayerId
+        });
+        if (hasCollision) {
+          console.warn(
+            `[worker] player rename skipped due to name collision account=${account.id} current="${account.ign}" next="${nextIgn}" external_player_id="${account.externalPlayerId}"`
+          );
+        } else {
+          const didUpdateIgn = await updateTrackedAccountIgnIfChanged({
+            trackedAccountId: account.id,
+            ign: nextIgn
+          });
+          if (didUpdateIgn) {
+            console.log(`[worker] player rename detected account=${account.id} old="${account.ign}" new="${nextIgn}"`);
+          }
+        }
+      } else {
+        await updateTrackedAccountIgnIfChanged({
+          trackedAccountId: account.id,
+          ign: nextIgn
+        });
       }
     }
     await insertRankSnapshot({
@@ -109,7 +129,14 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
     await updateTrackedAccountLiveStats({
       trackedAccountId: account.id,
       currentLevel: rank.currentLevel ?? null,
+      careerKills: rank.careerKills ?? null,
+      careerDamage: rank.careerDamage ?? null,
+      careerWins: rank.careerWins ?? null,
       realtime: rank.realtime ?? null
+    });
+    await autoLinkTrackedAccountByExactFingerprint({
+      trackedAccountId: account.id,
+      actorUserId: account.ownerUserId
     });
     await updateTrackedAccountLastCheckedAt(account.id);
     recordProviderHealth(statsProvider.name, true);

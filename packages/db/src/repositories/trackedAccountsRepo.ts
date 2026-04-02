@@ -15,6 +15,7 @@ const ACCOUNT_FIELDS = `
   guild_id as "guildId",
   owner_user_id as "ownerUserId",
   (select display_name from users where discord_user_id = owner_user_id) as "ownerDisplayName",
+  identity_group_id as "identityGroupId",
   ign,
   platform,
   external_player_id as "externalPlayerId",
@@ -24,6 +25,9 @@ const ACCOUNT_FIELDS = `
   updated_at as "updatedAt",
   last_checked_at as "lastCheckedAt",
   current_level as "currentLevel",
+  career_kills as "careerKills",
+  career_damage as "careerDamage",
+  career_wins as "careerWins",
   realtime_lobby_state as "realtimeLobbyState",
   realtime_is_online as "realtimeIsOnline",
   realtime_is_in_game as "realtimeIsInGame",
@@ -42,6 +46,7 @@ const ACCOUNT_FIELDS_TA = `
   ta.guild_id as "guildId",
   ta.owner_user_id as "ownerUserId",
   (select display_name from users u where u.discord_user_id = ta.owner_user_id) as "ownerDisplayName",
+  ta.identity_group_id as "identityGroupId",
   ta.ign,
   ta.platform,
   ta.external_player_id as "externalPlayerId",
@@ -49,7 +54,21 @@ const ACCOUNT_FIELDS_TA = `
   ta.is_active as "isActive",
   ta.created_at as "createdAt",
   ta.updated_at as "updatedAt",
-  ta.last_checked_at as "lastCheckedAt"
+  ta.last_checked_at as "lastCheckedAt",
+  ta.current_level as "currentLevel",
+  ta.career_kills as "careerKills",
+  ta.career_damage as "careerDamage",
+  ta.career_wins as "careerWins",
+  ta.realtime_lobby_state as "realtimeLobbyState",
+  ta.realtime_is_online as "realtimeIsOnline",
+  ta.realtime_is_in_game as "realtimeIsInGame",
+  ta.realtime_can_join as "realtimeCanJoin",
+  ta.realtime_party_full as "realtimePartyFull",
+  ta.realtime_selected_legend as "realtimeSelectedLegend",
+  ta.realtime_current_state as "realtimeCurrentState",
+  ta.realtime_current_state_as_text as "realtimeCurrentStateAsText",
+  ta.realtime_current_state_since_timestamp as "realtimeCurrentStateSinceTimestamp",
+  ta.realtime_updated_at as "realtimeUpdatedAt"
 `;
 
 export async function addTrackedAccount(input: TTrackInsert): Promise<TTrackedAccount> {
@@ -234,6 +253,9 @@ export async function updateTrackedAccountLastCheckedAt(trackedAccountId: string
 export async function updateTrackedAccountLiveStats(params: {
   trackedAccountId: string;
   currentLevel?: number | null;
+  careerKills?: number | null;
+  careerDamage?: number | null;
+  careerWins?: number | null;
   realtime?: {
     lobbyState?: string | null;
     isOnline?: number | null;
@@ -251,15 +273,18 @@ export async function updateTrackedAccountLiveStats(params: {
     update tracked_accounts
     set
       current_level = $2,
-      realtime_lobby_state = $3,
-      realtime_is_online = $4,
-      realtime_is_in_game = $5,
-      realtime_can_join = $6,
-      realtime_party_full = $7,
-      realtime_selected_legend = $8,
-      realtime_current_state = $9,
-      realtime_current_state_as_text = $10,
-      realtime_current_state_since_timestamp = $11,
+      career_kills = $3,
+      career_damage = $4,
+      career_wins = $5,
+      realtime_lobby_state = $6,
+      realtime_is_online = $7,
+      realtime_is_in_game = $8,
+      realtime_can_join = $9,
+      realtime_party_full = $10,
+      realtime_selected_legend = $11,
+      realtime_current_state = $12,
+      realtime_current_state_as_text = $13,
+      realtime_current_state_since_timestamp = $14,
       realtime_updated_at = now(),
       updated_at = now()
     where id = $1
@@ -267,6 +292,9 @@ export async function updateTrackedAccountLiveStats(params: {
     [
       params.trackedAccountId,
       params.currentLevel ?? null,
+      params.careerKills ?? null,
+      params.careerDamage ?? null,
+      params.careerWins ?? null,
       params.realtime?.lobbyState ?? null,
       params.realtime?.isOnline ?? null,
       params.realtime?.isInGame ?? null,
@@ -305,6 +333,313 @@ export async function updateTrackedAccountIgnIfChanged(params: {
   } catch {
     // Avoid failing ingestion on rare name collisions; UUID remains canonical.
     return false;
+  }
+}
+
+export async function updateTrackedAccountIgnById(params: {
+  trackedAccountId: string;
+  ign: string;
+}): Promise<boolean> {
+  const nextIgn = params.ign.trim();
+  if (!nextIgn) {
+    return false;
+  }
+  try {
+    const result = await pool.query<{ ign: string }>(
+      `
+      update tracked_accounts
+      set
+        ign = $2,
+        updated_at = now()
+      where id = $1
+      returning ign
+      `,
+      [params.trackedAccountId, nextIgn]
+    );
+    return (result.rowCount ?? 0) > 0;
+  } catch {
+    // Keep script/worker resilient to collisions; UUID remains canonical.
+    return false;
+  }
+}
+
+export async function hasIgnConflictForDifferentExternalId(params: {
+  trackedAccountId: string;
+  ign: string;
+  externalPlayerId: string | null;
+}): Promise<boolean> {
+  const nextIgn = params.ign.trim();
+  if (!nextIgn) {
+    return false;
+  }
+  const result = await pool.query<{ id: string }>(
+    `
+    select id
+    from tracked_accounts
+    where is_active = true
+      and id <> $1
+      and lower(ign) = lower($2)
+      and (
+        external_player_id is distinct from $3
+      )
+    limit 1
+    `,
+    [params.trackedAccountId, nextIgn, params.externalPlayerId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function autoLinkTrackedAccountByExactFingerprint(params: {
+  trackedAccountId: string;
+  actorUserId: string;
+}): Promise<{ linked: boolean; identityGroupId: string | null }> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const current = await client.query<{
+      id: string;
+      guildId: string;
+      ownerUserId: string;
+      platform: TPlatform;
+      ign: string;
+      identityGroupId: string | null;
+      currentLevel: number | null;
+      careerKills: number | null;
+      careerDamage: number | null;
+      careerWins: number | null;
+    }>(
+      `
+      select
+        id,
+        guild_id as "guildId",
+        owner_user_id as "ownerUserId",
+        platform,
+        ign,
+        identity_group_id as "identityGroupId",
+        current_level as "currentLevel",
+        career_kills as "careerKills",
+        career_damage as "careerDamage",
+        career_wins as "careerWins"
+      from tracked_accounts
+      where id = $1 and is_active = true
+      for update
+      `,
+      [params.trackedAccountId]
+    );
+    const row = current.rows[0];
+    if (!row) {
+      await client.query("rollback");
+      return { linked: false, identityGroupId: null };
+    }
+
+    const peerResult = await client.query<{
+      id: string;
+      identityGroupId: string | null;
+    }>(
+      `
+      select
+        id,
+        identity_group_id as "identityGroupId"
+      from tracked_accounts
+      where is_active = true
+        and id <> $1
+        and guild_id = $2
+        and owner_user_id = $3
+        and platform <> $4
+        and lower(trim(ign)) = lower(trim($5))
+        and current_level is not distinct from $6
+        and career_kills is not distinct from $7
+        and career_damage is not distinct from $8
+        and career_wins is not distinct from $9
+      order by created_at asc
+      limit 1
+      for update
+      `,
+      [
+        row.id,
+        row.guildId,
+        row.ownerUserId,
+        row.platform,
+        row.ign,
+        row.currentLevel,
+        row.careerKills,
+        row.careerDamage,
+        row.careerWins
+      ]
+    );
+    const peer = peerResult.rows[0];
+    if (!peer) {
+      await client.query("commit");
+      return { linked: false, identityGroupId: row.identityGroupId ?? null };
+    }
+
+    if (row.identityGroupId && peer.identityGroupId && row.identityGroupId !== peer.identityGroupId) {
+      await client.query("commit");
+      return { linked: false, identityGroupId: row.identityGroupId };
+    }
+
+    const groupId = row.identityGroupId ?? peer.identityGroupId ?? null;
+    const resolvedGroupId =
+      groupId ??
+      (
+        await client.query<{ id: string }>("select gen_random_uuid()::text as id")
+      ).rows[0].id;
+
+    await client.query(
+      `
+      update tracked_accounts
+      set identity_group_id = $2,
+          updated_at = now()
+      where id = $1
+      `,
+      [row.id, resolvedGroupId]
+    );
+    await client.query(
+      `
+      update tracked_accounts
+      set identity_group_id = $2,
+          updated_at = now()
+      where id = $1
+      `,
+      [peer.id, resolvedGroupId]
+    );
+    await client.query(
+      `
+      insert into identity_link_events
+        (guild_id, actor_user_id, event_type, tracked_account_id, peer_tracked_account_id, old_group_id, new_group_id, reason)
+      values
+        ($1, $2, 'auto_link', $3, $4, $5, $6, $7)
+      `,
+      [
+        row.guildId,
+        params.actorUserId,
+        row.id,
+        peer.id,
+        row.identityGroupId,
+        resolvedGroupId,
+        "exact_owner_name_stats_platform"
+      ]
+    );
+
+    await client.query("commit");
+    return { linked: true, identityGroupId: resolvedGroupId };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function linkTrackedAccounts(params: {
+  guildId: string;
+  actorUserId: string;
+  sourceTrackedAccountId: string;
+  targetTrackedAccountId: string;
+  reason: string;
+}): Promise<{ identityGroupId: string }> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const rows = await client.query<{ id: string; identityGroupId: string | null }>(
+      `
+      select id, identity_group_id as "identityGroupId"
+      from tracked_accounts
+      where guild_id = $1 and id = any($2::uuid[])
+      for update
+      `,
+      [params.guildId, [params.sourceTrackedAccountId, params.targetTrackedAccountId]]
+    );
+    if (rows.rowCount !== 2) {
+      throw new AppError("Tracked accounts not found for linking.", 404, "NOT_FOUND");
+    }
+    const source = rows.rows.find((r) => r.id === params.sourceTrackedAccountId)!;
+    const target = rows.rows.find((r) => r.id === params.targetTrackedAccountId)!;
+    const resolvedGroupId =
+      target.identityGroupId ??
+      source.identityGroupId ??
+      (await client.query<{ id: string }>("select gen_random_uuid()::text as id")).rows[0].id;
+
+    await client.query(
+      `
+      update tracked_accounts
+      set identity_group_id = $2, updated_at = now()
+      where id = any($1::uuid[])
+      `,
+      [[params.sourceTrackedAccountId, params.targetTrackedAccountId], resolvedGroupId]
+    );
+    await client.query(
+      `
+      insert into identity_link_events
+        (guild_id, actor_user_id, event_type, tracked_account_id, peer_tracked_account_id, old_group_id, new_group_id, reason)
+      values
+        ($1, $2, 'manual_link', $3, $4, $5, $6, $7)
+      `,
+      [
+        params.guildId,
+        params.actorUserId,
+        params.sourceTrackedAccountId,
+        params.targetTrackedAccountId,
+        source.identityGroupId,
+        resolvedGroupId,
+        params.reason
+      ]
+    );
+    await client.query("commit");
+    return { identityGroupId: resolvedGroupId };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function unlinkTrackedAccount(params: {
+  guildId: string;
+  actorUserId: string;
+  trackedAccountId: string;
+  reason: string;
+}): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const existing = await client.query<{ identityGroupId: string | null }>(
+      `
+      select identity_group_id as "identityGroupId"
+      from tracked_accounts
+      where guild_id = $1 and id = $2
+      for update
+      `,
+      [params.guildId, params.trackedAccountId]
+    );
+    if ((existing.rowCount ?? 0) === 0) {
+      throw new AppError("Tracked account not found.", 404, "NOT_FOUND");
+    }
+    const oldGroupId = existing.rows[0].identityGroupId;
+    await client.query(
+      `
+      update tracked_accounts
+      set identity_group_id = null, updated_at = now()
+      where guild_id = $1 and id = $2
+      `,
+      [params.guildId, params.trackedAccountId]
+    );
+    await client.query(
+      `
+      insert into identity_link_events
+        (guild_id, actor_user_id, event_type, tracked_account_id, old_group_id, new_group_id, reason)
+      values
+        ($1, $2, 'manual_unlink', $3, $4, null, $5)
+      `,
+      [params.guildId, params.actorUserId, params.trackedAccountId, oldGroupId, params.reason]
+    );
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
   }
 }
 

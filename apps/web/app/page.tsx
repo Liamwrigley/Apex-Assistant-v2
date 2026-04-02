@@ -17,6 +17,7 @@ import {
   getRankTimelinesByTrackedAccountIds,
   listTrackedAccounts,
 } from "@apex-assistant/db";
+import { evaluateRealtimePresence } from "@/lib/realtime-presence";
 import Image from "next/image";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +64,7 @@ function formatRelativeTime(input: string): string {
 
 type TTrackedRow = {
   id: string;
+  identityGroupId: string | null;
   ign: string;
   platform: string;
   ownerUserId: string;
@@ -147,6 +149,7 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
 
   const tracked: TTrackedRow[] = trackedAccounts.map((row) => ({
     id: row.id,
+    identityGroupId: row.identityGroupId ?? null,
     ign: row.ign,
     platform: row.platform,
     ownerUserId: row.ownerUserId,
@@ -286,12 +289,14 @@ export default async function HomePage() {
   );
   const informativeRealtimeRows = tracked
     .filter((row) => {
-      const state = row.realtimeCurrentStateAsText?.toLowerCase() ?? "";
-      return (
-        row.realtimeIsInGame === 1 ||
-        row.realtimeIsOnline === 1 ||
-        (state.length > 0 && state !== "offline")
-      );
+      const evaluation = evaluateRealtimePresence({
+        realtimeUpdatedAt: row.realtimeUpdatedAt,
+        realtimeIsOnline: row.realtimeIsOnline,
+        realtimeIsInGame: row.realtimeIsInGame,
+        realtimeCurrentState: row.realtimeCurrentState,
+        realtimeCurrentStateAsText: row.realtimeCurrentStateAsText
+      });
+      return evaluation.shouldShow;
     })
     .sort((a, b) => {
       const aGame = a.realtimeIsInGame === 1 ? 1 : 0;
@@ -559,24 +564,33 @@ export default async function HomePage() {
             <CardDescription>Realtime player activity.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {informativeRealtimeRows.map((row) => {
                 const iconUrl = getLegendIconUrl(row.realtimeSelectedLegend);
+                const evaluation = evaluateRealtimePresence({
+                  realtimeUpdatedAt: row.realtimeUpdatedAt,
+                  realtimeIsOnline: row.realtimeIsOnline,
+                  realtimeIsInGame: row.realtimeIsInGame,
+                  realtimeCurrentState: row.realtimeCurrentState,
+                  realtimeCurrentStateAsText: row.realtimeCurrentStateAsText
+                });
+                const showInGame = evaluation.status === "in_game";
+                const showOnline = evaluation.status === "online";
                 return (
                   <div
                     key={row.id}
-                    className="bg-muted/20 flex items-center gap-3 rounded-md border p-3"
+                    className="bg-muted/20 flex min-h-[260px] flex-col overflow-hidden rounded-md border p-2"
                   >
                     {iconUrl ? (
                       <img
                         src={iconUrl}
                         alt={row.realtimeSelectedLegend ?? "Legend"}
-                        className="h-10 w-10 rounded-md border"
+                        className="h-40 w-full object-cover"
                       />
                     ) : (
-                      <div className="bg-muted h-10 w-10 rounded-md border" />
+                      <div className="bg-muted h-40 w-full" />
                     )}
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 px-1 pt-2">
                       <div className="truncate text-sm font-medium">
                         {row.ign}
                       </div>
@@ -587,12 +601,12 @@ export default async function HomePage() {
                           : ""}
                       </div>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {row.realtimeIsInGame === 1 ? (
+                        {showInGame ? (
                           <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
                             In Game
                           </span>
                         ) : null}
-                        {row.realtimeIsOnline === 1 ? (
+                        {showOnline ? (
                           <span className="rounded bg-cyan-500/15 px-1.5 py-0.5 text-[10px] text-cyan-300">
                             Online
                           </span>
@@ -607,6 +621,9 @@ export default async function HomePage() {
                             {row.realtimeCurrentStateAsText}
                           </span>
                         ) : null}
+                        <span className="text-muted-foreground rounded bg-white/5 px-1.5 py-0.5 text-[10px]">
+                          {evaluation.reason}
+                        </span>
                         {row.realtimeSelectedLegend ? (
                           <span className="text-muted-foreground rounded bg-white/5 px-1.5 py-0.5 text-[10px]">
                             {row.realtimeSelectedLegend}
@@ -687,41 +704,68 @@ export default async function HomePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {accounts.map((row) => (
-                        <tr key={row.id} className="border-t">
-                          <td
-                            className="px-3 py-2 font-medium truncate"
-                            title={row.ign}
-                          >
-                            {row.ign}
-                          </td>
-                          <td className="px-3 py-2 uppercase whitespace-nowrap">
-                            {row.platform}
-                          </td>
-                          <td
-                            className="px-3 py-2 font-mono text-xs truncate"
-                            title={row.externalPlayerId ?? "-"}
-                          >
-                            {row.externalPlayerId ?? "-"}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            {new Date(row.createdAt).toLocaleString()}
-                          </td>
-                          <td className="px-3 py-2 text-right whitespace-nowrap">
-                            {row.lastCheckedAt ? (
-                              <span
-                                title={new Date(
-                                  row.lastCheckedAt,
-                                ).toLocaleString()}
+                      {Object.values(
+                        accounts.reduce(
+                          (acc, row) => {
+                            const key = row.identityGroupId ?? `solo:${row.id}`;
+                            if (!acc[key]) {
+                              acc[key] = [];
+                            }
+                            acc[key].push(row);
+                            return acc;
+                          },
+                          {} as Record<string, TTrackedRow[]>,
+                        ),
+                      ).flatMap((groupRows) =>
+                        groupRows.map((row, index) => {
+                          const isLinked = groupRows.length > 1;
+                          const isFirst = index === 0;
+                          const isLast = index === groupRows.length - 1;
+                          return (
+                            <tr key={row.id} className="border-t">
+                              <td className="relative px-3 py-2 font-medium truncate" title={row.ign}>
+                                {isLinked ? (
+                                  <>
+                                    <span
+                                      className={`absolute left-1 w-[2px] bg-emerald-400/70 ${
+                                        isFirst
+                                          ? "top-1/2 bottom-0"
+                                          : isLast
+                                            ? "top-0 bottom-1/2"
+                                            : "top-0 bottom-0"
+                                      }`}
+                                    />
+                                    <span className="bg-emerald-400 absolute left-[0px] top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full" />
+                                  </>
+                                ) : null}
+                                <span className={isLinked ? "pl-3" : ""}>{row.ign}</span>
+                                {isLinked ? (
+                                  <span className="text-muted-foreground ml-2 text-[11px]">Linked</span>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-2 uppercase whitespace-nowrap">{row.platform}</td>
+                              <td
+                                className="px-3 py-2 font-mono text-xs truncate"
+                                title={row.externalPlayerId ?? "-"}
                               >
-                                {formatRelativeTime(row.lastCheckedAt)}
-                              </span>
-                            ) : (
-                              "Never"
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                                {row.externalPlayerId ?? "-"}
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap">
+                                {new Date(row.createdAt).toLocaleString()}
+                              </td>
+                              <td className="px-3 py-2 text-right whitespace-nowrap">
+                                {row.lastCheckedAt ? (
+                                  <span title={new Date(row.lastCheckedAt).toLocaleString()}>
+                                    {formatRelativeTime(row.lastCheckedAt)}
+                                  </span>
+                                ) : (
+                                  "Never"
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        }),
+                      )}
                     </tbody>
                   </table>
                 </div>

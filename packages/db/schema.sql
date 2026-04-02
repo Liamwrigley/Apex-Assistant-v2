@@ -29,6 +29,10 @@ alter table tracked_accounts add column if not exists external_source text;
 alter table tracked_accounts add column if not exists ingest_claimed_until timestamptz;
 alter table tracked_accounts add column if not exists ingest_claimed_by text;
 alter table tracked_accounts add column if not exists current_level integer;
+alter table tracked_accounts add column if not exists career_kills integer;
+alter table tracked_accounts add column if not exists career_damage integer;
+alter table tracked_accounts add column if not exists career_wins integer;
+alter table tracked_accounts add column if not exists identity_group_id uuid;
 alter table tracked_accounts add column if not exists realtime_lobby_state text;
 alter table tracked_accounts add column if not exists realtime_is_online integer;
 alter table tracked_accounts add column if not exists realtime_is_in_game integer;
@@ -40,6 +44,7 @@ alter table tracked_accounts add column if not exists realtime_current_state_as_
 alter table tracked_accounts add column if not exists realtime_current_state_since_timestamp bigint;
 alter table tracked_accounts add column if not exists realtime_updated_at timestamptz;
 create index if not exists idx_tracked_accounts_external_player_id on tracked_accounts (external_player_id);
+create index if not exists idx_tracked_accounts_identity_group_id on tracked_accounts (identity_group_id);
 create index if not exists idx_tracked_accounts_claim on tracked_accounts (is_active, ingest_claimed_until, last_checked_at);
 create unique index if not exists uq_tracked_accounts_external_unique
   on tracked_accounts (guild_id, platform, external_source, external_player_id)
@@ -118,3 +123,19 @@ create table if not exists ingestion_runs (
 );
 
 create index if not exists idx_ingestion_runs_provider_started on ingestion_runs (provider, started_at desc);
+
+create table if not exists identity_link_events (
+  id uuid primary key default gen_random_uuid(),
+  guild_id text not null,
+  actor_user_id text not null,
+  event_type text not null check (event_type in ('auto_link', 'manual_link', 'manual_unlink')),
+  tracked_account_id uuid not null references tracked_accounts(id) on delete cascade,
+  peer_tracked_account_id uuid references tracked_accounts(id) on delete set null,
+  old_group_id uuid,
+  new_group_id uuid,
+  reason text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_identity_link_events_account_created
+  on identity_link_events (tracked_account_id, created_at desc);

@@ -15,6 +15,7 @@ type TTimelinePoint = { capturedAt: string; rankScore: number };
 
 type TSortKey = "ign" | "platform" | "rankName" | "rankScore" | "deltaRp24h";
 type TSortDir = "asc" | "desc";
+type TPlatformFilter = "all" | "origin" | "psn" | "xbl";
 
 function sortIndicator(active: boolean, dir: TSortDir): string {
   if (!active) {
@@ -26,6 +27,35 @@ function sortIndicator(active: boolean, dir: TSortDir): string {
 export function LeaderboardTable(props: { rows: TLeaderboardRow[]; timelines: Record<string, TTimelinePoint[]> }) {
   const [sortKey, setSortKey] = useState<TSortKey>("rankScore");
   const [sortDir, setSortDir] = useState<TSortDir>("desc");
+  const [platformFilter, setPlatformFilter] = useState<TPlatformFilter>("all");
+
+  function normalizePlatform(platform: string): TPlatformFilter {
+    const value = platform.toLowerCase();
+    if (value === "origin" || value === "pc") {
+      return "origin";
+    }
+    if (value === "psn" || value === "ps4") {
+      return "psn";
+    }
+    if (value === "xbl" || value === "x1") {
+      return "xbl";
+    }
+    return "all";
+  }
+
+  function platformLabel(platform: string): string {
+    const normalized = normalizePlatform(platform);
+    if (normalized === "origin") {
+      return "PC";
+    }
+    if (normalized === "psn") {
+      return "PS4";
+    }
+    if (normalized === "xbl") {
+      return "X1";
+    }
+    return platform.toUpperCase();
+  }
 
   function onSort(nextKey: TSortKey) {
     if (sortKey === nextKey) {
@@ -37,7 +67,12 @@ export function LeaderboardTable(props: { rows: TLeaderboardRow[]; timelines: Re
   }
 
   const sortedRows = useMemo(() => {
-    const data = [...props.rows];
+    const data = props.rows.filter((row) => {
+      if (platformFilter === "all") {
+        return true;
+      }
+      return normalizePlatform(row.platform) === platformFilter;
+    });
     data.sort((a, b) => {
       const direction = sortDir === "asc" ? 1 : -1;
       if (sortKey === "rankScore") {
@@ -55,10 +90,23 @@ export function LeaderboardTable(props: { rows: TLeaderboardRow[]; timelines: Re
       return a.rankName.localeCompare(b.rankName) * direction;
     });
     return data;
-  }, [props.rows, sortDir, sortKey]);
+  }, [platformFilter, props.rows, sortDir, sortKey]);
 
   return (
     <div className="overflow-x-auto rounded-lg border">
+      <div className="bg-muted/20 flex items-center justify-end border-b px-3 py-2">
+        <label className="text-muted-foreground mr-2 text-xs">Platform</label>
+        <select
+          className="bg-background border-input rounded border px-2 py-1 text-xs"
+          value={platformFilter}
+          onChange={(event) => setPlatformFilter(event.target.value as TPlatformFilter)}
+        >
+          <option value="all">All</option>
+          <option value="origin">PC</option>
+          <option value="psn">PS4</option>
+          <option value="xbl">X1</option>
+        </select>
+      </div>
       <table className="w-full text-sm">
         <thead className="bg-muted/40">
           <tr className="text-left">
@@ -90,12 +138,15 @@ export function LeaderboardTable(props: { rows: TLeaderboardRow[]; timelines: Re
             <tr key={row.trackedAccountId} className="border-t">
               <td className="px-3 py-3 align-middle">{index + 1}</td>
               <td className="px-3 py-3 align-middle">
-                <div className="flex min-w-0 flex-col gap-0.5 leading-tight">
+                <div className="flex min-w-0 flex-col gap-1 leading-tight">
                   <span className="truncate font-medium" title={row.ign}>
                     {row.ign}
                   </span>
-                  <span className="text-muted-foreground truncate text-xs uppercase" title={row.platform}>
-                    {row.platform}
+                  <span
+                    className="inline-flex w-fit items-center rounded border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] uppercase text-cyan-300"
+                    title={row.platform}
+                  >
+                    {platformLabel(row.platform)}
                   </span>
                 </div>
               </td>

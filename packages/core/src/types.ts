@@ -16,6 +16,7 @@ export type TTrackedAccount = {
   guildId: string;
   ownerUserId: string;
   ownerDisplayName?: string | null;
+  identityGroupId: string | null;
   ign: string;
   platform: TPlatform;
   externalPlayerId: string | null;
@@ -25,6 +26,9 @@ export type TTrackedAccount = {
   updatedAt: Date;
   lastCheckedAt: Date | null;
   currentLevel: number | null;
+  careerKills: number | null;
+  careerDamage: number | null;
+  careerWins: number | null;
   realtimeLobbyState: string | null;
   realtimeIsOnline: number | null;
   realtimeIsInGame: number | null;

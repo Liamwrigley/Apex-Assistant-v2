@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "migrate": "tsx src/scripts/migrate.ts"
+    "migrate": "tsx src/scripts/migrate.ts",
+    "fix:names": "tsx src/scripts/fixTrackedAccountNames.ts"
   },
   "dependencies": {
     "@apex-assistant/core": "0.1.0",
