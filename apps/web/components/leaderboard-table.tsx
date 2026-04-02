@@ -9,6 +9,8 @@ type TLeaderboardRow = {
   platform: string;
   rankScore: number;
   rankName: string;
+  rankDivision: string | null;
+  iconUrl: string | null;
   deltaRp24h: number | null;
 };
 type TTimelinePoint = { capturedAt: string; rankScore: number };
@@ -164,11 +166,23 @@ export function LeaderboardTable(props: {
                 </div>
               </td>
               <td className="px-3 py-3 align-middle">
-                <div className="flex min-w-0 flex-col gap-0.5 leading-tight">
-                  <span className="truncate" title={row.rankName}>
-                    {row.rankName}
-                  </span>
-                  <span className="text-muted-foreground whitespace-nowrap text-xs">{row.rankScore.toLocaleString()} RP</span>
+                <div className="flex min-w-0 items-start gap-2 leading-tight">
+                  {row.iconUrl ? (
+                    <img
+                      src={row.iconUrl}
+                      alt=""
+                      className="mt-0.5 h-8 w-8 shrink-0 object-contain"
+                    />
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <span className="truncate" title={row.rankName}>
+                      {row.rankName}
+                      {row.rankDivision ? ` ${row.rankDivision}` : ""}
+                    </span>
+                    <span className="text-muted-foreground block whitespace-nowrap text-xs">
+                      {row.rankScore.toLocaleString()} RP
+                    </span>
+                  </div>
                 </div>
               </td>
               <td className="px-3 py-3 text-right align-middle">

@@ -8,7 +8,7 @@ export type TRankSnapshot = {
   rankName: string;
   rankDivision: string | null;
   iconUrl: string | null;
-  source: "trn";
+  source: string;
 };
 
 export type TTrackedAccount = {
@@ -26,6 +26,12 @@ export type TTrackedAccount = {
   updatedAt: Date;
   lastCheckedAt: Date | null;
   currentLevel: number | null;
+  /** Latest BR rank tier name from provider (e.g. "Bronze"). */
+  currentRankName: string | null;
+  /** Latest BR rank division from provider (e.g. "4" for Bronze IV). */
+  currentRankDivision: string | null;
+  /** Latest rank tier icon URL from provider (e.g. mozambiquehe.re rank asset). */
+  currentRankIconUrl: string | null;
   careerKills: number | null;
   careerDamage: number | null;
   careerWins: number | null;

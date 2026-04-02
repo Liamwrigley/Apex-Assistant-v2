@@ -1,5 +1,6 @@
 import { AutoRefresh } from "@/components/auto-refresh";
 import { LeaderboardCard } from "@/components/leaderboard-card";
+import { TrackedAccountsOwnerTable } from "@/components/tracked-accounts-owner-table";
 import {
   Card,
   CardContent,
@@ -31,37 +32,6 @@ function pageLog(message: string, meta?: Record<string, unknown>) {
   console.log(`[web:page] ${message}${payload}`);
 }
 
-function formatRelativeTime(input: string): string {
-  const then = new Date(input).getTime();
-  const now = Date.now();
-  const deltaMs = Math.max(0, now - then);
-  const minutes = Math.floor(deltaMs / 60_000);
-  if (minutes < 1) {
-    return "just now";
-  }
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${hours}h ago`;
-  }
-  const days = Math.floor(hours / 24);
-  if (days < 7) {
-    return `${days}d ago`;
-  }
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) {
-    return `${weeks}w ago`;
-  }
-  const months = Math.floor(days / 30);
-  if (months < 12) {
-    return `${months}mo ago`;
-  }
-  const years = Math.floor(days / 365);
-  return `${years}y ago`;
-}
-
 type TTrackedRow = {
   id: string;
   identityGroupId: string | null;
@@ -83,6 +53,9 @@ type TTrackedRow = {
   realtimeCurrentStateAsText: string | null;
   realtimeCurrentStateSinceTimestamp: number | null;
   realtimeUpdatedAt: string | null;
+  currentRankName: string | null;
+  currentRankDivision: string | null;
+  currentRankIconUrl: string | null;
 };
 
 type TLeaderboardRow = {
@@ -91,6 +64,8 @@ type TLeaderboardRow = {
   platform: string;
   rankScore: number;
   rankName: string;
+  rankDivision: string | null;
+  iconUrl: string | null;
   deltaRp24h: number | null;
 };
 
@@ -105,13 +80,57 @@ function getLegendIconUrl(legend: string | null | undefined): string | null {
   return `https://api.mozambiquehe.re/assets/icons/${encodeURIComponent(legend.toLowerCase())}.png`;
 }
 
+/** One live-presence card per linked crossplay identity; solo rows use their own id. */
+function presenceDedupeKey(row: TTrackedRow): string {
+  if (row.identityGroupId) {
+    return `gid:${row.identityGroupId}`;
+  }
+  // Fallback dedupe for pre-linked rows: same owner + normalized IGN.
+  return `owner:${row.ownerUserId}\0ign:${row.ign.trim().toLowerCase()}`;
+}
+
+function platformChipLabel(platform: string): string {
+  const value = platform.toLowerCase();
+  if (value === "origin" || value === "pc") {
+    return "PC";
+  }
+  if (value === "psn" || value === "ps4") {
+    return "PS";
+  }
+  if (value === "xbl" || value === "x1") {
+    return "XBOX";
+  }
+  return platform.toUpperCase();
+}
+
+/** Hide provider state labels that contradict “this player is visible in Live Presence”. */
+function isOfflineLikeStateLabel(text: string | null | undefined): boolean {
+  if (!text?.trim()) {
+    return false;
+  }
+  const t = text.trim().toLowerCase();
+  return ["offline", "afk", "disconnected", "not online"].some((frag) =>
+    t.includes(frag),
+  );
+}
+
+type TStatsMover = {
+  ign: string;
+  platform: string;
+  deltaRp: number;
+  rankName: string | null;
+  rankDivision: string | null;
+  iconUrl: string | null;
+  rankScore: number | null;
+};
+
 async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
   leaderboard: TLeaderboardRow[];
   tracked: TTrackedRow[];
   timelines: Record<string, Array<{ capturedAt: string; rankScore: number }>>;
   stats24h: {
-    highestGainer: { ign: string; platform: string; deltaRp: number } | null;
-    biggestLoser: { ign: string; platform: string; deltaRp: number } | null;
+    highestGainer: TStatsMover | null;
+    biggestLoser: TStatsMover | null;
   };
 }> {
   const [leaderboardRows, trackedAccounts, stats24h] = await Promise.all([
@@ -128,6 +147,8 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       platform: r.platform,
       rankScore: r.rankScore,
       rankName: r.rankName,
+      rankDivision: r.rankDivision ?? null,
+      iconUrl: r.iconUrl ?? null,
       deltaRp24h: r.deltaRp24h,
     }));
 
@@ -171,6 +192,9 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     realtimeUpdatedAt: row.realtimeUpdatedAt
       ? toIso(row.realtimeUpdatedAt)
       : null,
+    currentRankName: row.currentRankName ?? null,
+    currentRankDivision: row.currentRankDivision ?? null,
+    currentRankIconUrl: row.currentRankIconUrl ?? null,
   }));
 
   pageLog("dashboard db load", {
@@ -179,7 +203,44 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     trackedCount: tracked.length,
   });
 
-  return { leaderboard, tracked, timelines, stats24h };
+  const lbByKey = new Map(
+    leaderboard.map((r) => [`${r.ign}\0${r.platform}`, r]),
+  );
+  function rankExtras(ign: string, platform: string) {
+    const row = lbByKey.get(`${ign}\0${platform}`);
+    return {
+      rankName: row?.rankName ?? null,
+      rankDivision: row?.rankDivision ?? null,
+      iconUrl: row?.iconUrl ?? null,
+      rankScore: row?.rankScore ?? null,
+    };
+  }
+  const stats24hDisplay = {
+    highestGainer: stats24h.highestGainer
+      ? {
+          ign: stats24h.highestGainer.ign,
+          platform: stats24h.highestGainer.platform,
+          deltaRp: stats24h.highestGainer.deltaRp,
+          ...rankExtras(
+            stats24h.highestGainer.ign,
+            stats24h.highestGainer.platform,
+          ),
+        }
+      : null,
+    biggestLoser: stats24h.biggestLoser
+      ? {
+          ign: stats24h.biggestLoser.ign,
+          platform: stats24h.biggestLoser.platform,
+          deltaRp: stats24h.biggestLoser.deltaRp,
+          ...rankExtras(
+            stats24h.biggestLoser.ign,
+            stats24h.biggestLoser.platform,
+          ),
+        }
+      : null,
+  };
+
+  return { leaderboard, tracked, timelines, stats24h: stats24hDisplay };
 }
 
 type TServiceHealthRow = {
@@ -287,6 +348,7 @@ export default async function HomePage() {
     },
     {} as Record<string, TTrackedRow[]>,
   );
+  const seenPresenceGroups = new Set<string>();
   const informativeRealtimeRows = tracked
     .filter((row) => {
       const evaluation = evaluateRealtimePresence({
@@ -294,7 +356,7 @@ export default async function HomePage() {
         realtimeIsOnline: row.realtimeIsOnline,
         realtimeIsInGame: row.realtimeIsInGame,
         realtimeCurrentState: row.realtimeCurrentState,
-        realtimeCurrentStateAsText: row.realtimeCurrentStateAsText
+        realtimeCurrentStateAsText: row.realtimeCurrentStateAsText,
       });
       return evaluation.shouldShow;
     })
@@ -309,7 +371,24 @@ export default async function HomePage() {
       if (aOnline !== bOnline) {
         return bOnline - aOnline;
       }
+      const aTs = a.realtimeUpdatedAt
+        ? new Date(a.realtimeUpdatedAt).getTime()
+        : 0;
+      const bTs = b.realtimeUpdatedAt
+        ? new Date(b.realtimeUpdatedAt).getTime()
+        : 0;
+      if (aTs !== bTs) {
+        return bTs - aTs;
+      }
       return a.ign.localeCompare(b.ign);
+    })
+    .filter((row) => {
+      const key = presenceDedupeKey(row);
+      if (seenPresenceGroups.has(key)) {
+        return false;
+      }
+      seenPresenceGroups.add(key);
+      return true;
     });
   const averageRp =
     leaderboard.length === 0
@@ -404,140 +483,141 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-5">
+      <section className="grid gap-3 md:grid-cols-5">
         <Card className="border-emerald-500/20 bg-emerald-500/5">
-          <CardHeader className="space-y-1.5 p-3">
-            <div className="bg-emerald-500/15 text-emerald-300 inline-flex h-6 w-6 items-center justify-center rounded-md">
+          <CardHeader className="space-y-1 p-2.5">
+            <div className="bg-emerald-500/15 text-emerald-300 inline-flex h-5 w-5 items-center justify-center rounded-sm">
               <svg
                 viewBox="0 0 20 20"
                 fill="currentColor"
                 aria-hidden
-                className="h-3.5 w-3.5"
+                className="h-3 w-3"
               >
                 <path d="M10 2a4 4 0 100 8 4 4 0 000-8zM3 16a7 7 0 1114 0v1H3v-1z" />
               </svg>
             </div>
-            <CardDescription className="text-xs">
+            <CardDescription className="text-[11px] leading-none">
               Tracked Players
             </CardDescription>
-            <CardTitle className="text-xl">{tracked.length}</CardTitle>
+            <div className="min-w-0 space-y-0.5">
+              <CardTitle className="text-lg font-semibold tabular-nums leading-tight">
+                {tracked.length}
+              </CardTitle>
+              <p className="text-muted-foreground min-h-[1rem] text-xs leading-tight">
+                {"\u00a0"}
+              </p>
+            </div>
           </CardHeader>
         </Card>
         <Card className="border-cyan-500/20 bg-cyan-500/5">
-          <CardHeader className="space-y-1.5 p-3">
-            <div className="bg-cyan-500/15 text-cyan-300 inline-flex h-6 w-6 items-center justify-center rounded-md">
+          <CardHeader className="space-y-1 p-2.5">
+            <div className="bg-cyan-500/15 text-cyan-300 inline-flex h-5 w-5 items-center justify-center rounded-sm">
               <svg
                 viewBox="0 0 20 20"
                 fill="currentColor"
                 aria-hidden
-                className="h-3.5 w-3.5"
+                className="h-3 w-3"
               >
                 <path d="M4 15h2V8H4v7zm5 0h2V3H9v12zm5 0h2v-5h-2v5z" />
               </svg>
             </div>
-            <CardDescription className="text-xs">Average RP</CardDescription>
-            <CardTitle className="text-xl">
-              {averageRp.toLocaleString()}
-            </CardTitle>
+            <CardDescription className="text-[11px] leading-none">
+              Average RP
+            </CardDescription>
+            <div className="min-w-0 space-y-0.5">
+              <CardTitle className="text-lg font-semibold tabular-nums leading-tight">
+                {averageRp.toLocaleString()}
+              </CardTitle>
+              <p className="text-muted-foreground min-h-[1rem] text-xs leading-tight">
+                {"\u00a0"}
+              </p>
+            </div>
           </CardHeader>
         </Card>
         <Card className="border-amber-500/20 bg-amber-500/5">
-          <CardHeader className="space-y-1.5 p-3">
-            <div className="bg-amber-500/15 text-amber-300 inline-flex h-6 w-6 items-center justify-center rounded-md">
+          <CardHeader className="space-y-1 p-2.5">
+            <div className="bg-amber-500/15 text-amber-300 inline-flex h-5 w-5 items-center justify-center rounded-sm">
               <svg
                 viewBox="0 0 20 20"
                 fill="currentColor"
                 aria-hidden
-                className="h-3.5 w-3.5"
+                className="h-3 w-3"
               >
                 <path d="M5 3h10v2h1a1 1 0 011 1v2a4 4 0 01-4 4h-1.1A4 4 0 0111 13v2h2v2H7v-2h2v-2a4 4 0 01-.9-2H7a4 4 0 01-4-4V6a1 1 0 011-1h1V3zM5 7H4v1a2 2 0 002 2h1V7zm10 0h1v1a2 2 0 01-2 2h-1V7z" />
               </svg>
             </div>
-            <CardDescription className="text-xs">Top Player</CardDescription>
-            <CardTitle className="truncate text-lg">
-              {top ? top.ign : ""}
-            </CardTitle>
+            <CardDescription className="text-[11px] leading-none">Top Player</CardDescription>
+            <div className="min-w-0 space-y-0.5">
+              <CardTitle className="truncate text-lg font-semibold leading-tight">
+                {top ? top.ign : "—"}
+              </CardTitle>
+              <p className="text-muted-foreground min-h-[1rem] truncate text-xs leading-tight">
+                {top ? `${top.rankScore.toLocaleString()} RP` : "\u00a0"}
+              </p>
+            </div>
           </CardHeader>
         </Card>
         <Card className="border-emerald-500/20 bg-emerald-500/5">
-          <CardHeader className="space-y-1.5 p-3">
-            <div className="bg-emerald-500/15 text-emerald-300 inline-flex h-6 w-6 items-center justify-center rounded-md">
+          <CardHeader className="space-y-1 p-2.5">
+            <div className="bg-emerald-500/15 text-emerald-300 inline-flex h-5 w-5 items-center justify-center rounded-sm">
               <svg
                 viewBox="0 0 20 20"
                 fill="currentColor"
                 aria-hidden
-                className="h-3.5 w-3.5"
+                className="h-3 w-3"
               >
                 <path d="M10 3l5 6h-3v8H8V9H5l5-6z" />
               </svg>
             </div>
-            <CardDescription className="text-xs">
+            <CardDescription className="text-[11px] leading-none">
               Highest Gainer (24h)
             </CardDescription>
-            <CardTitle className="truncate text-sm">
-              {stats24h.highestGainer ? stats24h.highestGainer.ign : ""}
-            </CardTitle>
+            <div className="min-w-0 space-y-0.5">
+              <CardTitle className="truncate text-lg font-semibold leading-tight">
+                {stats24h.highestGainer ? stats24h.highestGainer.ign : "—"}
+              </CardTitle>
+              <p className="text-muted-foreground min-h-[1rem] truncate text-xs leading-tight">
+                {stats24h.highestGainer
+                  ? `+${stats24h.highestGainer.deltaRp.toLocaleString()} RP`
+                  : "\u00a0"}
+              </p>
+            </div>
           </CardHeader>
-          <CardContent className="px-3 pb-3 pt-0">
-            {stats24h.highestGainer ? (
-              <div className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-300">
-                <svg
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  aria-hidden
-                  className="h-3.5 w-3.5"
-                >
-                  <path d="M10 3l5 6h-3v8H8V9H5l5-6z" />
-                </svg>
-                <span>
-                  +{stats24h.highestGainer.deltaRp.toLocaleString()} RP
-                </span>
-              </div>
-            ) : (
-              <div className="h-5" />
-            )}
-          </CardContent>
         </Card>
         <Card className="border-rose-500/20 bg-rose-500/5">
-          <CardHeader className="space-y-1.5 p-3">
-            <div className="bg-rose-500/15 text-rose-300 inline-flex h-6 w-6 items-center justify-center rounded-md">
+          <CardHeader className="space-y-1 p-2.5">
+            <div className="bg-rose-500/15 text-rose-300 inline-flex h-5 w-5 items-center justify-center rounded-sm">
               <svg
                 viewBox="0 0 20 20"
                 fill="currentColor"
                 aria-hidden
-                className="h-3.5 w-3.5"
+                className="h-3 w-3"
               >
                 <path d="M10 17l-5-6h3V3h4v8h3l-5 6z" />
               </svg>
             </div>
-            <CardDescription className="text-xs">
+            <CardDescription className="text-[11px] leading-none">
               Biggest Loser (24h)
             </CardDescription>
-            <CardTitle className="truncate text-sm">
-              {stats24h.biggestLoser ? stats24h.biggestLoser.ign : ""}
-            </CardTitle>
+            <div className="min-w-0 space-y-0.5">
+              <CardTitle className="truncate text-lg font-semibold leading-tight">
+                {stats24h.biggestLoser ? stats24h.biggestLoser.ign : "—"}
+              </CardTitle>
+              <p className="text-muted-foreground min-h-[1rem] truncate text-xs leading-tight">
+                {stats24h.biggestLoser
+                  ? `${stats24h.biggestLoser.deltaRp.toLocaleString()} RP`
+                  : "\u00a0"}
+              </p>
+            </div>
           </CardHeader>
-          <CardContent className="px-3 pb-3 pt-0">
-            {stats24h.biggestLoser ? (
-              <div className="inline-flex items-center gap-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 text-xs text-rose-300">
-                <svg
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  aria-hidden
-                  className="h-3.5 w-3.5"
-                >
-                  <path d="M10 17l-5-6h3V3h4v8h3l-5 6z" />
-                </svg>
-                <span>{stats24h.biggestLoser.deltaRp.toLocaleString()} RP</span>
-              </div>
-            ) : (
-              <div className="h-5" />
-            )}
-          </CardContent>
         </Card>
       </section>
 
-      <LeaderboardCard rows={leaderboard} timelines={timelines} trackedCount={tracked.length} />
+      <LeaderboardCard
+        rows={leaderboard}
+        timelines={timelines}
+        trackedCount={tracked.length}
+      />
 
       {informativeRealtimeRows.length > 0 ? (
         <Card>
@@ -548,25 +628,31 @@ export default async function HomePage() {
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {informativeRealtimeRows.map((row) => {
-                const iconUrl = getLegendIconUrl(row.realtimeSelectedLegend);
+                const legendIconUrl = getLegendIconUrl(
+                  row.realtimeSelectedLegend,
+                );
+                const heroIconUrl = legendIconUrl ?? row.currentRankIconUrl;
                 const evaluation = evaluateRealtimePresence({
                   realtimeUpdatedAt: row.realtimeUpdatedAt,
                   realtimeIsOnline: row.realtimeIsOnline,
                   realtimeIsInGame: row.realtimeIsInGame,
                   realtimeCurrentState: row.realtimeCurrentState,
-                  realtimeCurrentStateAsText: row.realtimeCurrentStateAsText
+                  realtimeCurrentStateAsText: row.realtimeCurrentStateAsText,
                 });
                 const showInGame = evaluation.status === "in_game";
-                const showOnline = evaluation.status === "online";
                 return (
                   <div
                     key={row.id}
                     className="bg-muted/20 flex min-h-[260px] flex-col overflow-hidden rounded-md border p-2"
                   >
-                    {iconUrl ? (
+                    {heroIconUrl ? (
                       <img
-                        src={iconUrl}
-                        alt={row.realtimeSelectedLegend ?? "Legend"}
+                        src={heroIconUrl}
+                        alt={
+                          row.realtimeSelectedLegend ??
+                          row.currentRankName ??
+                          "Player"
+                        }
                         className="h-40 w-full object-cover"
                       />
                     ) : (
@@ -576,21 +662,35 @@ export default async function HomePage() {
                       <div className="truncate text-sm font-medium">
                         {row.ign}
                       </div>
-                      <div className="text-muted-foreground truncate text-xs uppercase">
-                        {row.platform}
+                      <div className="text-muted-foreground mt-0.5 truncate text-xs">
                         {typeof row.currentLevel === "number"
-                          ? ` • Lv ${row.currentLevel}`
+                          ? `Lv ${row.currentLevel}`
                           : ""}
                       </div>
+                      {row.currentRankName ? (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          {row.currentRankIconUrl ? (
+                            <img
+                              src={row.currentRankIconUrl}
+                              alt=""
+                              className="h-4 w-4 shrink-0 object-contain"
+                            />
+                          ) : null}
+                          <span className="text-muted-foreground truncate text-[11px]">
+                            {row.currentRankName}
+                            {row.currentRankDivision
+                              ? ` ${row.currentRankDivision}`
+                              : ""}
+                          </span>
+                        </div>
+                      ) : null}
                       <div className="mt-1 flex flex-wrap gap-1">
+                        <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] text-violet-300">
+                          {platformChipLabel(row.platform)}
+                        </span>
                         {showInGame ? (
                           <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
                             In Game
-                          </span>
-                        ) : null}
-                        {showOnline ? (
-                          <span className="rounded bg-cyan-500/15 px-1.5 py-0.5 text-[10px] text-cyan-300">
-                            Online
                           </span>
                         ) : null}
                         {row.realtimeCanJoin === 1 ? (
@@ -598,24 +698,18 @@ export default async function HomePage() {
                             Joinable
                           </span>
                         ) : null}
-                        {row.realtimeCurrentStateAsText ? (
+                        {row.realtimeCurrentStateAsText &&
+                        !isOfflineLikeStateLabel(row.realtimeCurrentStateAsText) ? (
                           <span className="text-muted-foreground rounded bg-white/5 px-1.5 py-0.5 text-[10px]">
                             {row.realtimeCurrentStateAsText}
                           </span>
                         ) : null}
-                        {showOnline && row.realtimeLobbyState ? (
+                        {row.realtimeLobbyState ? (
                           <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">
                             Lobby: {row.realtimeLobbyState}
                           </span>
                         ) : null}
-                        <span className="text-muted-foreground rounded bg-white/5 px-1.5 py-0.5 text-[10px]">
-                          {evaluation.reason}
-                        </span>
-                        {row.realtimeSelectedLegend ? (
-                          <span className="text-muted-foreground rounded bg-white/5 px-1.5 py-0.5 text-[10px]">
-                            {row.realtimeSelectedLegend}
-                          </span>
-                        ) : null}
+                        {/* No "Online" chip: rows here are already treated as visible/active. */}
                       </div>
                     </div>
                   </div>
@@ -641,121 +735,11 @@ export default async function HomePage() {
           ) : (
             <div className="space-y-4">
               {Object.entries(trackedByOwner).map(([ownerName, accounts]) => (
-                <div
+                <TrackedAccountsOwnerTable
                   key={ownerName}
-                  className="overflow-x-auto rounded-lg border"
-                >
-                  <div className="bg-muted/40 px-3 py-2 text-sm font-medium">
-                    {ownerName}
-                  </div>
-                  <table className="w-full table-fixed text-sm">
-                    <colgroup>
-                      <col className="w-[22%]" />
-                      <col className="w-[12%]" />
-                      <col className="w-[26%]" />
-                      <col className="w-[24%]" />
-                      <col className="w-[16%]" />
-                    </colgroup>
-                    <thead className="bg-muted/20">
-                      <tr className="text-left">
-                        <th
-                          className="px-3 py-2 font-medium"
-                          title="Tracked player IGN"
-                        >
-                          Player
-                        </th>
-                        <th
-                          className="px-3 py-2 font-medium"
-                          title="Input platform used for provider lookups"
-                        >
-                          Platform
-                        </th>
-                        <th
-                          className="px-3 py-2 font-medium"
-                          title="Provider-specific unique account id"
-                        >
-                          Provider UID
-                        </th>
-                        <th
-                          className="px-3 py-2 font-medium"
-                          title="When this tracked account was created"
-                        >
-                          Date Added
-                        </th>
-                        <th
-                          className="px-3 py-2 font-medium text-right"
-                          title="Last successful rank snapshot write"
-                        >
-                          Last Sync
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Object.values(
-                        accounts.reduce(
-                          (acc, row) => {
-                            const key = row.identityGroupId ?? `solo:${row.id}`;
-                            if (!acc[key]) {
-                              acc[key] = [];
-                            }
-                            acc[key].push(row);
-                            return acc;
-                          },
-                          {} as Record<string, TTrackedRow[]>,
-                        ),
-                      ).flatMap((groupRows) =>
-                        groupRows.map((row, index) => {
-                          const isLinked = groupRows.length > 1;
-                          const isFirst = index === 0;
-                          const isLast = index === groupRows.length - 1;
-                          return (
-                            <tr key={row.id} className="border-t">
-                              <td className="relative px-3 py-2 font-medium truncate" title={row.ign}>
-                                {isLinked ? (
-                                  <>
-                                    <span
-                                      className={`absolute left-1 w-[2px] bg-emerald-400/70 ${
-                                        isFirst
-                                          ? "top-1/2 bottom-0"
-                                          : isLast
-                                            ? "top-0 bottom-1/2"
-                                            : "top-0 bottom-0"
-                                      }`}
-                                    />
-                                    <span className="bg-emerald-400 absolute left-[0px] top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full" />
-                                  </>
-                                ) : null}
-                                <span className={isLinked ? "pl-3" : ""}>{row.ign}</span>
-                                {isLinked ? (
-                                  <span className="text-muted-foreground ml-2 text-[11px]">Linked</span>
-                                ) : null}
-                              </td>
-                              <td className="px-3 py-2 uppercase whitespace-nowrap">{row.platform}</td>
-                              <td
-                                className="px-3 py-2 font-mono text-xs truncate"
-                                title={row.externalPlayerId ?? "-"}
-                              >
-                                {row.externalPlayerId ?? "-"}
-                              </td>
-                              <td className="px-3 py-2 whitespace-nowrap">
-                                {new Date(row.createdAt).toLocaleString()}
-                              </td>
-                              <td className="px-3 py-2 text-right whitespace-nowrap">
-                                {row.lastCheckedAt ? (
-                                  <span title={new Date(row.lastCheckedAt).toLocaleString()}>
-                                    {formatRelativeTime(row.lastCheckedAt)}
-                                  </span>
-                                ) : (
-                                  "Never"
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        }),
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                  ownerName={ownerName}
+                  accounts={accounts}
+                />
               ))}
             </div>
           )}

@@ -8,6 +8,7 @@ import {
   listTrackedAccountsByGuild,
   releaseTrackedAccountClaim,
   updateTrackedAccountIgnIfChanged,
+  updateTrackedAccountCurrentRank,
   updateTrackedAccountLiveStats,
   updateTrackedAccountLastCheckedAt,
   upsertMatch
@@ -118,6 +119,12 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       rankDivision: rank.rankDivision,
       iconUrl: rank.iconUrl,
       source: statsProvider.name
+    });
+    await updateTrackedAccountCurrentRank({
+      trackedAccountId: account.id,
+      rankName: rank.rankName ?? null,
+      rankDivision: rank.rankDivision ?? null,
+      iconUrl: rank.iconUrl ?? null
     });
     await insertPlayerStatsSnapshot({
       trackedAccountId: account.id,

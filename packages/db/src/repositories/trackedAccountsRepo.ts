@@ -25,6 +25,9 @@ const ACCOUNT_FIELDS = `
   updated_at as "updatedAt",
   last_checked_at as "lastCheckedAt",
   current_level as "currentLevel",
+  current_rank_name as "currentRankName",
+  current_rank_division as "currentRankDivision",
+  current_rank_icon_url as "currentRankIconUrl",
   career_kills as "careerKills",
   career_damage as "careerDamage",
   career_wins as "careerWins",
@@ -56,6 +59,50 @@ const ACCOUNT_FIELDS_TA = `
   ta.updated_at as "updatedAt",
   ta.last_checked_at as "lastCheckedAt",
   ta.current_level as "currentLevel",
+  ta.career_kills as "careerKills",
+  ta.career_damage as "careerDamage",
+  ta.career_wins as "careerWins",
+  ta.realtime_lobby_state as "realtimeLobbyState",
+  ta.realtime_is_online as "realtimeIsOnline",
+  ta.realtime_is_in_game as "realtimeIsInGame",
+  ta.realtime_can_join as "realtimeCanJoin",
+  ta.realtime_party_full as "realtimePartyFull",
+  ta.realtime_selected_legend as "realtimeSelectedLegend",
+  ta.realtime_current_state as "realtimeCurrentState",
+  ta.realtime_current_state_as_text as "realtimeCurrentStateAsText",
+  ta.realtime_current_state_since_timestamp as "realtimeCurrentStateSinceTimestamp",
+  ta.realtime_updated_at as "realtimeUpdatedAt"
+`;
+
+/** List reads: show rank from latest rank_snapshots when denormalized current_rank_* on ta is null. */
+const RANK_SNAPSHOT_FOR_LIST_LATERAL = `
+left join lateral (
+  select rank_name, rank_division, icon_url
+  from rank_snapshots
+  where tracked_account_id = ta.id
+  order by captured_at desc
+  limit 1
+) lr on true
+`;
+
+const ACCOUNT_FIELDS_TA_LIST = `
+  ta.id,
+  ta.guild_id as "guildId",
+  ta.owner_user_id as "ownerUserId",
+  (select display_name from users where discord_user_id = ta.owner_user_id) as "ownerDisplayName",
+  ta.identity_group_id as "identityGroupId",
+  ta.ign,
+  ta.platform,
+  ta.external_player_id as "externalPlayerId",
+  ta.external_source as "externalSource",
+  ta.is_active as "isActive",
+  ta.created_at as "createdAt",
+  ta.updated_at as "updatedAt",
+  ta.last_checked_at as "lastCheckedAt",
+  ta.current_level as "currentLevel",
+  coalesce(ta.current_rank_name, lr.rank_name) as "currentRankName",
+  coalesce(ta.current_rank_division, lr.rank_division) as "currentRankDivision",
+  coalesce(ta.current_rank_icon_url, lr.icon_url) as "currentRankIconUrl",
   ta.career_kills as "careerKills",
   ta.career_damage as "careerDamage",
   ta.career_wins as "careerWins",
@@ -147,10 +194,11 @@ export async function removeTrackedAccount(input: TTrackInsert): Promise<boolean
 export async function listTrackedAccountsByOwner(guildId: string, ownerUserId: string): Promise<TTrackedAccount[]> {
   const result = await pool.query<TTrackedAccount>(
     `
-    select ${ACCOUNT_FIELDS}
-    from tracked_accounts
-    where guild_id = $1 and owner_user_id = $2 and is_active = true
-    order by created_at desc
+    select ${ACCOUNT_FIELDS_TA_LIST}
+    from tracked_accounts ta
+    ${RANK_SNAPSHOT_FOR_LIST_LATERAL}
+    where ta.guild_id = $1 and ta.owner_user_id = $2 and ta.is_active = true
+    order by ta.created_at desc
     `,
     [guildId, ownerUserId]
   );
@@ -167,13 +215,14 @@ export async function searchTrackedAccountsByOwner(params: {
   const limit = params.limit ?? 25;
   const result = await pool.query<TTrackedAccount>(
     `
-    select ${ACCOUNT_FIELDS}
-    from tracked_accounts
-    where guild_id = $1
-      and owner_user_id = $2
-      and is_active = true
-      and (ign ilike $3 or platform ilike $3)
-    order by created_at desc
+    select ${ACCOUNT_FIELDS_TA_LIST}
+    from tracked_accounts ta
+    ${RANK_SNAPSHOT_FOR_LIST_LATERAL}
+    where ta.guild_id = $1
+      and ta.owner_user_id = $2
+      and ta.is_active = true
+      and (ta.ign ilike $3 or ta.platform ilike $3)
+    order by ta.created_at desc
     limit $4
     `,
     [params.guildId, params.ownerUserId, search, limit]
@@ -184,10 +233,11 @@ export async function searchTrackedAccountsByOwner(params: {
 export async function listTrackedAccountsByGuild(guildId: string): Promise<TTrackedAccount[]> {
   const result = await pool.query<TTrackedAccount>(
     `
-    select ${ACCOUNT_FIELDS}
-    from tracked_accounts
-    where guild_id = $1 and is_active = true
-    order by created_at desc
+    select ${ACCOUNT_FIELDS_TA_LIST}
+    from tracked_accounts ta
+    ${RANK_SNAPSHOT_FOR_LIST_LATERAL}
+    where ta.guild_id = $1 and ta.is_active = true
+    order by ta.created_at desc
     `,
     [guildId]
   );
@@ -198,11 +248,12 @@ export async function listTrackedAccounts(guildId?: string): Promise<TTrackedAcc
   const withGuildFilter = typeof guildId === "string" && guildId.length > 0;
   const result = await pool.query<TTrackedAccount>(
     `
-    select ${ACCOUNT_FIELDS}
-    from tracked_accounts
-    where is_active = true
-      and ($1::text is null or guild_id = $1)
-    order by created_at desc
+    select ${ACCOUNT_FIELDS_TA_LIST}
+    from tracked_accounts ta
+    ${RANK_SNAPSHOT_FOR_LIST_LATERAL}
+    where ta.is_active = true
+      and ($1::text is null or ta.guild_id = $1)
+    order by ta.created_at desc
     `,
     [withGuildFilter ? guildId : null]
   );
@@ -248,6 +299,26 @@ export async function updateTrackedAccountLastCheckedAt(trackedAccountId: string
   if (result.rowCount === 0) {
     console.warn(`[db] updateTrackedAccountLastCheckedAt: no row matched id=${trackedAccountId}`);
   }
+}
+
+export async function updateTrackedAccountCurrentRank(params: {
+  trackedAccountId: string;
+  rankName: string | null;
+  rankDivision: string | null;
+  iconUrl: string | null;
+}): Promise<void> {
+  await pool.query(
+    `
+    update tracked_accounts
+    set
+      current_rank_name = $2,
+      current_rank_division = $3,
+      current_rank_icon_url = $4,
+      updated_at = now()
+    where id = $1
+    `,
+    [params.trackedAccountId, params.rankName ?? null, params.rankDivision ?? null, params.iconUrl ?? null]
+  );
 }
 
 export async function updateTrackedAccountLiveStats(params: {

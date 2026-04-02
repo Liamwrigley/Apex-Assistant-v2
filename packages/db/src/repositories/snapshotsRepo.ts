@@ -128,6 +128,8 @@ export async function getLeaderboardWithDelta24h(guildId?: string): Promise<
     guildId: string;
     rankScore: number;
     rankName: string;
+    rankDivision: string | null;
+    iconUrl: string | null;
     capturedAt: Date;
     deltaRp24h: number | null;
   }>
@@ -141,6 +143,8 @@ export async function getLeaderboardWithDelta24h(guildId?: string): Promise<
     guildId: string;
     rankScore: number;
     rankName: string;
+    rankDivision: string | null;
+    iconUrl: string | null;
     capturedAt: Date;
     deltaRp24h: number | null;
   }>(
@@ -154,6 +158,8 @@ export async function getLeaderboardWithDelta24h(guildId?: string): Promise<
         ta.guild_id as "guildId",
         rs.rank_score as "rankScore",
         rs.rank_name as "rankName",
+        rs.rank_division as "rankDivision",
+        rs.icon_url as "iconUrl",
         rs.captured_at as "capturedAt"
       from tracked_accounts ta
       join rank_snapshots rs on rs.tracked_account_id = ta.id
@@ -184,6 +190,8 @@ export async function getLeaderboardWithDelta24h(guildId?: string): Promise<
       l."guildId",
       l."rankScore",
       l."rankName",
+      l."rankDivision",
+      l."iconUrl",
       l."capturedAt",
       d."deltaRp24h"
     from latest l
