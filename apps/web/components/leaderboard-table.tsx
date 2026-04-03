@@ -215,8 +215,11 @@ export function LeaderboardTable(props: {
                   ""
                 )}
               </td>
-              <td className="w-full px-3 py-3 align-middle" title="7-day RP trend. Tooltip shows hourly timestamp.">
-                <div className="flex justify-start">
+              <td
+                className="w-full overflow-visible px-3 py-3 align-middle"
+                title="7-day RP trend. Tooltip shows hourly timestamp."
+              >
+                <div className="flex justify-start overflow-visible">
                   <PlayerTimelineSparkline
                     trackedAccountId={row.trackedAccountId}
                     hours={168}

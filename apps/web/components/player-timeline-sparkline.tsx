@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type TPoint = {
   capturedAt: string;
@@ -9,6 +9,34 @@ type TPoint = {
 
 /** When set, x positions use absolute time so multiple charts share the same axis. */
 export type TSparklineXDomain = { minMs: number; maxMs: number };
+
+/** Local calendar dates (as yyyy-mm-dd) that overlap [minMs, maxMs]. */
+function localDatesOverlappingRange(minMs: number, maxMs: number): string[] {
+  const keys: string[] = [];
+  const cur = new Date(minMs);
+  cur.setHours(12, 0, 0, 0);
+  const end = new Date(maxMs);
+  end.setHours(12, 0, 0, 0);
+  const seen = new Set<string>();
+  while (cur.getTime() <= end.getTime()) {
+    const y = cur.getFullYear();
+    const m = String(cur.getMonth() + 1).padStart(2, "0");
+    const d = String(cur.getDate()).padStart(2, "0");
+    const key = `${y}-${m}-${d}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      keys.push(key);
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  return keys;
+}
+
+function parseLocalDateKey(key: string): Date {
+  const [y, m, d] = key.split("-").map(Number);
+  const dt = new Date(y, m - 1, d, 12, 0, 0, 0);
+  return dt;
+}
 
 export function PlayerTimelineSparkline(props: {
   trackedAccountId: string;
@@ -110,6 +138,58 @@ export function PlayerTimelineSparkline(props: {
     return { pathD, circles, min, max };
   }, [props.xDomain, sortedPoints]);
 
+  const chartAreaRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [tooltipLeftPx, setTooltipLeftPx] = useState<number | null>(null);
+
+  const hoverDotX = hoverIndex !== null ? chart.circles[hoverIndex]?.x : null;
+  const hoverCaptionKey =
+    hoverIndex !== null && sortedPoints[hoverIndex]
+      ? `${sortedPoints[hoverIndex].capturedAt}:${sortedPoints[hoverIndex].rankScore}`
+      : "";
+
+  useLayoutEffect(() => {
+    if (hoverIndex === null || sortedPoints.length < 2 || hoverDotX == null) {
+      setTooltipLeftPx(null);
+      return;
+    }
+
+    const area = chartAreaRef.current;
+    if (!area) {
+      return;
+    }
+
+    function layout() {
+      const tip = tooltipRef.current;
+      if (!tip) {
+        return;
+      }
+      const chartW = area.clientWidth;
+      const tipW = tip.getBoundingClientRect().width;
+      if (tipW < 4) {
+        requestAnimationFrame(layout);
+        return;
+      }
+      const pad = 6;
+      const centerX = (hoverDotX / dimensions.width) * chartW;
+      let left = centerX - tipW / 2;
+      if (left < pad) {
+        left = pad;
+      }
+      if (left + tipW > chartW - pad) {
+        left = Math.max(pad, chartW - pad - tipW);
+      }
+      setTooltipLeftPx(left);
+    }
+
+    layout();
+    const ro = new ResizeObserver(() => {
+      queueMicrotask(layout);
+    });
+    ro.observe(area);
+    return () => ro.disconnect();
+  }, [hoverCaptionKey, hoverDotX, hoverIndex, sortedPoints.length]);
+
   if (isLoading) {
     return <div className="h-[58px] w-full min-w-[240px] animate-pulse rounded bg-muted/50" />;
   }
@@ -133,16 +213,44 @@ export function PlayerTimelineSparkline(props: {
     props.xDomain && props.xDomain.maxMs >= props.xDomain.minMs
       ? props.xDomain.maxMs
       : new Date(sortedPoints[sortedPoints.length - 1].capturedAt).getTime();
-  const startLabel = new Date(startTime).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const endLabel = new Date(endTime).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const xTicks = [
-    { x: dimensions.padX, label: startLabel },
-    { x: dimensions.width - dimensions.padX, label: endLabel }
-  ];
+  const spanMs = Math.max(endTime - startTime, 1);
+  const innerW = dimensions.width - dimensions.padX * 2;
+  const dayKeys = localDatesOverlappingRange(startTime, endTime);
+  const xTicks = dayKeys.map((dateKey) => {
+    const day = parseLocalDateKey(dateKey);
+    const noon = day.getTime();
+    const u = (noon - startTime) / spanMs;
+    const x = dimensions.padX + Math.min(1, Math.max(0, u)) * innerW;
+    const label = day.toLocaleDateString(undefined, { weekday: "short", day: "numeric" });
+    return { dateKey, x, label };
+  });
 
   return (
-    <div className="relative w-full min-w-[240px] max-w-[640px]">
-      <div className="relative">
+    <div className="relative w-full min-w-[240px] max-w-[640px] overflow-visible">
+      <div ref={chartAreaRef} className="relative h-[58px] w-full overflow-visible">
+        {hoverPoint && hoverDot ? (
+          <div
+            ref={tooltipRef}
+            className="bg-background/95 pointer-events-none absolute z-20 mb-1 rounded border px-1.5 py-1 text-[10px] shadow whitespace-nowrap"
+            style={{
+              bottom: "100%",
+              left: tooltipLeftPx ?? 0,
+              visibility: tooltipLeftPx === null ? "hidden" : "visible"
+            }}
+          >
+            <span className="font-medium tabular-nums">{hoverPoint.rankScore.toLocaleString()} RP</span>
+            <span className="text-muted-foreground">
+              {" "}
+              ·{" "}
+              {new Date(hoverPoint.capturedAt).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit"
+              })}
+            </span>
+          </div>
+        ) : null}
         <svg
           viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
           className="h-[58px] w-full"
@@ -165,7 +273,7 @@ export function PlayerTimelineSparkline(props: {
           <path d={chart.pathD} fill="none" stroke={lineColor} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           {xTicks.map((tick) => (
             <line
-              key={`tick-${tick.x}`}
+              key={tick.dateKey}
               x1={tick.x}
               y1={dimensions.height - dimensions.padY}
               x2={tick.x}
@@ -187,16 +295,17 @@ export function PlayerTimelineSparkline(props: {
           ) : null}
           {hoverDot ? <circle cx={hoverDot.x} cy={hoverDot.y} r={2.8} fill={dotColor} /> : null}
         </svg>
-        {hoverPoint ? (
-          <div className="bg-background/95 pointer-events-none absolute -top-8 left-0 rounded border px-1.5 py-1 text-[10px] shadow">
-            {hoverPoint.rankScore.toLocaleString()} RP -{" "}
-            {new Date(hoverPoint.capturedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-          </div>
-        ) : null}
       </div>
-      <div className="text-muted-foreground mt-0.5 flex items-center justify-between text-[9px]">
-        <span className="text-left">{xTicks[0].label}</span>
-        <span className="text-right">{xTicks[1].label}</span>
+      <div className="text-muted-foreground relative mt-0.5 h-3.5 w-full text-[9px] leading-none">
+        {xTicks.map((tick) => (
+          <span
+            key={tick.dateKey}
+            className="pointer-events-none absolute top-0 -translate-x-1/2 whitespace-nowrap"
+            style={{ left: `${(tick.x / dimensions.width) * 100}%` }}
+          >
+            {tick.label}
+          </span>
+        ))}
       </div>
     </div>
   );
