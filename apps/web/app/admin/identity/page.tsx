@@ -69,42 +69,44 @@ export default async function IdentityAdminPage(props: {
         <p className="text-sm">No linked groups found.</p>
       ) : (
         linkedGroups.map(([groupId, members]) => (
-          <section key={groupId} className="rounded-lg border">
-            <div className="bg-muted/30 px-3 py-2 text-sm font-medium">
+          <section key={groupId} className="border-border/60 rounded-lg border">
+            <div className="border-border/60 border-b bg-muted/40 px-3 py-2 text-sm font-medium">
               Group {groupId}
             </div>
-            <table className="w-full text-sm">
-              <thead className="bg-muted/10">
-                <tr>
-                  <th className="px-3 py-2 text-left">Player</th>
-                  <th className="px-3 py-2 text-left">Platform</th>
-                  <th className="px-3 py-2 text-left">UID</th>
-                  <th className="px-3 py-2 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {members.map((member) => (
-                  <tr key={member.id} className="border-t">
-                    <td className="px-3 py-2">{member.ign}</td>
-                    <td className="px-3 py-2 uppercase">{member.platform}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{member.externalPlayerId ?? "-"}</td>
-                    <td className="px-3 py-2 text-right">
-                      <form action={unlinkAction}>
-                        <input type="hidden" name="key" value={key} />
-                        <input type="hidden" name="guildId" value={member.guildId} />
-                        <input type="hidden" name="trackedAccountId" value={member.id} />
-                        <button
-                          type="submit"
-                          className="rounded border border-rose-500/40 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10"
-                        >
-                          Unlink
-                        </button>
-                      </form>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] text-left text-sm">
+                <thead>
+                  <tr className="text-muted-foreground border-b text-xs">
+                    <th className="px-2 py-2 font-medium">Player</th>
+                    <th className="px-2 py-2 font-medium">Platform</th>
+                    <th className="px-2 py-2 font-medium">UID</th>
+                    <th className="px-2 py-2 text-right font-medium">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {members.map((member) => (
+                    <tr key={member.id} className="border-border/60 border-b last:border-0">
+                      <td className="px-2 py-2">{member.ign}</td>
+                      <td className="px-2 py-2 uppercase">{member.platform}</td>
+                      <td className="px-2 py-2 font-mono text-xs">{member.externalPlayerId ?? "-"}</td>
+                      <td className="px-2 py-2 text-right">
+                        <form action={unlinkAction}>
+                          <input type="hidden" name="key" value={key} />
+                          <input type="hidden" name="guildId" value={member.guildId} />
+                          <input type="hidden" name="trackedAccountId" value={member.id} />
+                          <button
+                            type="submit"
+                            className="rounded border border-rose-500/40 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10"
+                          >
+                            Unlink
+                          </button>
+                        </form>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         ))
       )}

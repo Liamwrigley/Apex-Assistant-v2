@@ -71,12 +71,12 @@ export function TrackedAccountsOwnerTable(props: {
   );
 
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <div className="bg-muted/40 px-3 py-2 text-sm font-medium">
+    <div className="border-border/60 overflow-x-auto rounded-lg border">
+      <div className="border-border/60 border-b bg-muted/40 px-3 py-2 text-sm font-medium">
         {props.ownerName}
       </div>
       <div className="min-w-0">
-        <table className="w-full table-fixed text-sm">
+        <table className="w-full min-w-[900px] table-fixed text-left text-sm">
           <colgroup>
             <col className="w-[18%]" />
             <col className="w-[10%]" />
@@ -85,37 +85,37 @@ export function TrackedAccountsOwnerTable(props: {
             <col className="w-[14%]" />
             <col className="w-[14%]" />
           </colgroup>
-          <thead className="bg-muted/20">
-            <tr className="text-left">
-              <th className="px-3 py-2 font-medium" title="Tracked player IGN">
+          <thead>
+            <tr className="text-muted-foreground border-b text-xs">
+              <th className="px-2 py-2 font-medium" title="Tracked player IGN">
                 Player
               </th>
               <th
-                className="px-3 py-2 font-medium"
+                className="px-2 py-2 font-medium"
                 title="Input platform used for provider lookups"
               >
                 Platform
               </th>
               <th
-                className="px-3 py-2 font-medium"
+                className="px-2 py-2 font-medium"
                 title="Last ingested ranked tier and division"
               >
                 Rank
               </th>
               <th
-                className="px-3 py-2 font-medium"
+                className="px-2 py-2 font-medium"
                 title="Provider-specific unique account id"
               >
                 Provider UID
               </th>
               <th
-                className="px-3 py-2 font-medium"
+                className="px-2 py-2 font-medium"
                 title="When this tracked account was created"
               >
                 Date Added
               </th>
               <th
-                className="px-3 py-2 text-right font-medium"
+                className="px-2 py-2 text-right font-medium"
                 title="Last successful rank snapshot write"
               >
                 Last Sync
@@ -141,7 +141,7 @@ export function TrackedAccountsOwnerTable(props: {
                     key={row.id}
                     data-linked-group={isLinked && linkId ? linkId : undefined}
                     className={cn(
-                      "border-t transition-colors duration-150",
+                      "border-border/60 border-b transition-colors duration-150 last:border-0",
                       isLinked && linkId && "group/linked",
                       rowHighlighted && "bg-emerald-500/15",
                     )}
@@ -166,7 +166,7 @@ export function TrackedAccountsOwnerTable(props: {
                   >
                     <td
                       className={cn(
-                        "relative px-3 py-2 font-medium truncate",
+                        "relative px-2 py-2 font-medium truncate",
                         isLinked && "overflow-visible pl-[1.35rem]",
                       )}
                       title={row.ign}
@@ -176,10 +176,10 @@ export function TrackedAccountsOwnerTable(props: {
                       ) : null}
                       <span className="relative z-[2]">{row.ign}</span>
                     </td>
-                    <td className="px-3 py-2 uppercase whitespace-nowrap">
+                    <td className="px-2 py-2 uppercase whitespace-nowrap">
                       {row.platform}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-2">
                       {row.currentRankName ? (
                         <div className="flex min-w-0 items-center gap-2">
                           {row.currentRankIconUrl ? (
@@ -203,15 +203,15 @@ export function TrackedAccountsOwnerTable(props: {
                       )}
                     </td>
                     <td
-                      className="px-3 py-2 font-mono text-xs truncate"
+                      className="px-2 py-2 font-mono text-xs truncate"
                       title={row.externalPlayerId ?? "-"}
                     >
                       {row.externalPlayerId ?? "-"}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
+                    <td className="px-2 py-2 whitespace-nowrap">
                       {new Date(row.createdAt).toLocaleString()}
                     </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <td className="px-2 py-2 text-right whitespace-nowrap">
                       {row.lastCheckedAt ? (
                         <span
                           title={new Date(row.lastCheckedAt).toLocaleString()}

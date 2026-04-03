@@ -75,28 +75,28 @@ export default async function RealtimeDebugPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="bg-muted/40">
-              <tr className="text-left">
-                <th className="px-2 py-2">Player</th>
-                <th className="px-2 py-2">Platform</th>
-                <th className="px-2 py-2">Lvl</th>
-                <th className="px-2 py-2">Updated</th>
-                <th className="px-2 py-2">Age</th>
-                <th className="px-2 py-2">isOnline</th>
-                <th className="px-2 py-2">isInGame</th>
-                <th className="px-2 py-2">canJoin</th>
-                <th className="px-2 py-2">Lobby</th>
-                <th className="px-2 py-2">Current State</th>
-                <th className="px-2 py-2">State Text</th>
-                <th className="px-2 py-2">Derived</th>
-                <th className="px-2 py-2">Show</th>
-                <th className="px-2 py-2">Reason</th>
+          <table className="w-full min-w-[1100px] text-left text-sm">
+            <thead>
+              <tr className="text-muted-foreground border-b text-xs">
+                <th className="px-2 py-2 font-medium">Player</th>
+                <th className="px-2 py-2 font-medium">Platform</th>
+                <th className="px-2 py-2 font-medium">Lvl</th>
+                <th className="px-2 py-2 font-medium">Updated</th>
+                <th className="px-2 py-2 font-medium">Age</th>
+                <th className="px-2 py-2 font-medium">isOnline</th>
+                <th className="px-2 py-2 font-medium">isInGame</th>
+                <th className="px-2 py-2 font-medium">canJoin</th>
+                <th className="px-2 py-2 font-medium">Lobby</th>
+                <th className="px-2 py-2 font-medium">Current State</th>
+                <th className="px-2 py-2 font-medium">State Text</th>
+                <th className="px-2 py-2 font-medium">Derived</th>
+                <th className="px-2 py-2 font-medium">Show</th>
+                <th className="px-2 py-2 font-medium">Reason</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.id} className="border-t">
+                <tr key={row.id} className="border-border/60 border-b last:border-0">
                   <td className="px-2 py-2">{row.ign}</td>
                   <td className="px-2 py-2">{platformLabel(row.platform)}</td>
                   <td className="px-2 py-2">{row.level ?? "-"}</td>

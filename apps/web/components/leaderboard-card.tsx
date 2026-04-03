@@ -53,7 +53,7 @@ export function LeaderboardCard(props: {
           </Select>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="overflow-x-auto">
         {props.rows.length === 0 ? (
           <p className="text-muted-foreground text-sm">
             {props.trackedCount > 0

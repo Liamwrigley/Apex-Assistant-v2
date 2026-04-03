@@ -122,38 +122,37 @@ export function LeaderboardTable(props: {
   }, [props.timelines, sortedRows]);
 
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full text-sm">
-        <thead className="bg-muted/40">
-          <tr className="text-left">
-            <th className="whitespace-nowrap px-3 py-2.5 font-medium" title="Leaderboard position by current sort order">
+    <table className="w-full min-w-[760px] text-left text-sm">
+        <thead>
+          <tr className="text-muted-foreground border-b text-xs">
+            <th className="whitespace-nowrap px-2 py-2 font-medium" title="Leaderboard position by current sort order">
               #
             </th>
-            <th className="whitespace-nowrap px-3 py-2.5 font-medium" title="Tracked player IGN and platform">
+            <th className="whitespace-nowrap px-2 py-2 font-medium" title="Tracked player IGN and platform">
               <button className="hover:text-foreground text-left" onClick={() => onSort("ign")} type="button">
                 Player{sortIndicator(sortKey === "ign", sortDir)}
               </button>
             </th>
-            <th className="whitespace-nowrap px-3 py-2.5 font-medium" title="Latest rank tier and current RP">
+            <th className="whitespace-nowrap px-2 py-2 font-medium" title="Latest rank tier and current RP">
               <button className="hover:text-foreground text-left" onClick={() => onSort("rankScore")} type="button">
                 Rank{sortIndicator(sortKey === "rankScore", sortDir)}
               </button>
             </th>
-            <th className="whitespace-nowrap px-3 py-2.5 font-medium text-right" title="Rolling 24-hour RP change">
-              <button className="hover:text-foreground text-right" onClick={() => onSort("deltaRp24h")} type="button">
+            <th className="whitespace-nowrap px-2 py-2 text-right font-medium" title="Rolling 24-hour RP change">
+              <button className="hover:text-foreground inline-block w-full text-right" onClick={() => onSort("deltaRp24h")} type="button">
                 24h Delta{sortIndicator(sortKey === "deltaRp24h", sortDir)}
               </button>
             </th>
-            <th className="w-full px-3 py-2.5 font-medium" title="7-day RP sparkline. Hover to scrub point values.">
+            <th className="w-full px-2 py-2 font-medium" title="7-day RP sparkline. Hover to scrub point values.">
               7d Trend
             </th>
           </tr>
         </thead>
         <tbody>
           {sortedRows.map((row, index) => (
-            <tr key={row.trackedAccountId} className="border-t">
-              <td className="px-3 py-3 align-middle">{index + 1}</td>
-              <td className="px-3 py-3 align-middle">
+            <tr key={row.trackedAccountId} className="border-border/60 border-b last:border-0">
+              <td className="px-2 py-2 align-middle">{index + 1}</td>
+              <td className="px-2 py-2 align-middle">
                 <div className="flex min-w-0 flex-col gap-1 leading-tight">
                   <span className="truncate font-medium" title={row.ign}>
                     {row.ign}
@@ -166,7 +165,7 @@ export function LeaderboardTable(props: {
                   </span>
                 </div>
               </td>
-              <td className="px-3 py-3 align-middle">
+              <td className="px-2 py-2 align-middle">
                 <div className="flex min-w-0 items-start gap-2 leading-tight">
                   {row.iconUrl ? (
                     <img
@@ -186,7 +185,7 @@ export function LeaderboardTable(props: {
                   </div>
                 </div>
               </td>
-              <td className="px-3 py-3 text-right align-middle">
+              <td className="px-2 py-2 text-right align-middle">
                 {typeof row.deltaRp24h === "number" ? (
                   <RpDeltaBadge delta={row.deltaRp24h} />
                 ) : (
@@ -194,7 +193,7 @@ export function LeaderboardTable(props: {
                 )}
               </td>
               <td
-                className="w-full overflow-visible px-3 py-3 align-middle"
+                className="w-full overflow-visible px-2 py-2 align-middle"
                 title="7-day RP trend. Tooltip shows hourly timestamp."
               >
                 <div className="flex justify-start overflow-visible">
@@ -209,7 +208,6 @@ export function LeaderboardTable(props: {
             </tr>
           ))}
         </tbody>
-      </table>
-    </div>
+    </table>
   );
 }
