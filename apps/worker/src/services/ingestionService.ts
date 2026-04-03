@@ -149,6 +149,9 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       nextActive: nextPresence.shouldShow,
       nextStatus: nextPresence.status,
       rankScore: rank.rankScore,
+      rankName: rank.rankName ?? null,
+      rankDivision: rank.rankDivision ?? null,
+      rankIconUrl: rank.iconUrl ?? null,
       selectedLegend: rank.realtime?.selectedLegend ?? null
     });
     await updateTrackedAccountLiveStats({

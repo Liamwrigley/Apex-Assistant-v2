@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { PlayerTimelineSparkline } from "@/components/player-timeline-sparkline";
+import { RpDeltaBadge } from "@/components/rp-delta-badge";
 
 type TLeaderboardRow = {
   trackedAccountId: string;
@@ -187,30 +188,7 @@ export function LeaderboardTable(props: {
               </td>
               <td className="px-3 py-3 text-right align-middle">
                 {typeof row.deltaRp24h === "number" ? (
-                  <span
-                    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${
-                      row.deltaRp24h > 0
-                        ? "bg-emerald-500/15 text-emerald-300"
-                        : row.deltaRp24h < 0
-                          ? "bg-rose-500/15 text-rose-300"
-                          : "text-muted-foreground"
-                    }`}
-                  >
-                    {row.deltaRp24h > 0 ? (
-                      <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className="h-3.5 w-3.5">
-                        <path d="M10 3l5 6h-3v8H8V9H5l5-6z" />
-                      </svg>
-                    ) : null}
-                    {row.deltaRp24h < 0 ? (
-                      <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className="h-3.5 w-3.5">
-                        <path d="M10 17l-5-6h3V3h4v8h3l-5 6z" />
-                      </svg>
-                    ) : null}
-                    <span>
-                      {row.deltaRp24h > 0 ? "+" : ""}
-                      {row.deltaRp24h.toLocaleString()}
-                    </span>
-                  </span>
+                  <RpDeltaBadge delta={row.deltaRp24h} />
                 ) : (
                   ""
                 )}

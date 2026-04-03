@@ -7,7 +7,9 @@ import {
 } from "@/components/ui/card";
 import { formatDurationMs } from "@/lib/format-duration";
 import { formatRelativeTime } from "@/lib/format-relative-time";
+import { computeRankScoreDelta, RpDeltaBadge } from "@/components/rp-delta-badge";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
+import { SessionRankSnap, type TSessionRankSnap } from "@/components/session-rank-snap";
 
 export type TRecentSessionRow = {
   sessionId: string;
@@ -17,6 +19,12 @@ export type TRecentSessionRow = {
   endedAt: string;
   openingRankScore: number | null;
   latestRankScore: number | null;
+  openingRankName: string | null;
+  openingRankDivision: string | null;
+  openingRankIconUrl: string | null;
+  latestRankName: string | null;
+  latestRankDivision: string | null;
+  latestRankIconUrl: string | null;
   legends: string[];
 };
 
@@ -34,19 +42,13 @@ function platformChipLabel(platform: string): string {
   return platform.toUpperCase();
 }
 
-function formatRpDelta(
-  opening: number | null,
-  latest: number | null
-): string | null {
-  if (opening === null || latest === null) {
-    return null;
-  }
-  const d = latest - opening;
-  if (d === 0) {
-    return "0 RP";
-  }
-  const abs = Math.abs(d).toLocaleString();
-  return d > 0 ? `+${abs} RP` : `−${abs} RP`;
+function toSnap(
+  score: number | null,
+  name: string | null,
+  division: string | null,
+  icon: string | null
+): TSessionRankSnap {
+  return { rankScore: score, rankName: name, rankDivision: division, iconUrl: icon };
 }
 
 export function RecentSessionsSection(props: { rows: TRecentSessionRow[] }) {
@@ -59,15 +61,17 @@ export function RecentSessionsSection(props: { rows: TRecentSessionRow[] }) {
       <CardHeader>
         <CardTitle>Recent sessions</CardTitle>
         <CardDescription>
-          Completed play sessions per tracked player (RP change and legends recorded while
-          they were active).
+          Completed play sessions per tracked player (rank at start vs end, RP change, and
+          legends while active).
         </CardDescription>
       </CardHeader>
       <CardContent className="overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-sm">
+        <table className="w-full min-w-[900px] text-left text-sm">
           <thead>
             <tr className="text-muted-foreground border-b text-xs">
               <th className="px-2 py-2 font-medium">Player</th>
+              <th className="px-2 py-2 font-medium">Start</th>
+              <th className="px-2 py-2 font-medium">End</th>
               <th className="px-2 py-2 font-medium">RP Δ</th>
               <th className="px-2 py-2 font-medium">Legends</th>
               <th className="px-2 py-2 font-medium">Duration</th>
@@ -79,18 +83,40 @@ export function RecentSessionsSection(props: { rows: TRecentSessionRow[] }) {
               const durationMs =
                 new Date(row.endedAt).getTime() -
                 new Date(row.startedAt).getTime();
+              const rpDelta = computeRankScoreDelta(
+                row.openingRankScore,
+                row.latestRankScore
+              );
+              const startSnap = toSnap(
+                row.openingRankScore,
+                row.openingRankName,
+                row.openingRankDivision,
+                row.openingRankIconUrl
+              );
+              const endSnap = toSnap(
+                row.latestRankScore,
+                row.latestRankName,
+                row.latestRankDivision,
+                row.latestRankIconUrl
+              );
               return (
                 <tr key={row.sessionId} className="border-border/60 border-b last:border-0">
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-2 align-top">
                     <div className="font-medium">{row.ign}</div>
                     <span className="text-muted-foreground mt-0.5 inline-block rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] text-violet-300">
                       {platformChipLabel(row.platform)}
                     </span>
                   </td>
-                  <td className="px-2 py-2 font-medium tabular-nums">
-                    {formatRpDelta(row.openingRankScore, row.latestRankScore) ?? "—"}
+                  <td className="px-2 py-2 align-top">
+                    <SessionRankSnap snap={startSnap} compact />
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-2 align-top">
+                    <SessionRankSnap snap={endSnap} compact />
+                  </td>
+                  <td className="px-2 py-2 align-middle">
+                    <RpDeltaBadge delta={rpDelta} />
+                  </td>
+                  <td className="px-2 py-2 align-top">
                     {row.legends.length === 0 ? (
                       <span className="text-muted-foreground">—</span>
                     ) : (
@@ -119,10 +145,10 @@ export function RecentSessionsSection(props: { rows: TRecentSessionRow[] }) {
                       </div>
                     )}
                   </td>
-                  <td className="text-muted-foreground px-2 py-2 tabular-nums">
+                  <td className="text-muted-foreground px-2 py-2 align-middle tabular-nums">
                     {formatDurationMs(durationMs)}
                   </td>
-                  <td className="text-muted-foreground px-2 py-2 text-right text-xs">
+                  <td className="text-muted-foreground px-2 py-2 text-right align-middle text-xs">
                     Finished {formatRelativeTime(row.endedAt)}
                   </td>
                 </tr>

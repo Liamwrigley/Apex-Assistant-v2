@@ -1,5 +1,7 @@
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
 import { formatDurationMs } from "@/lib/format-duration";
+import { computeRankScoreDelta, RpDeltaBadge } from "@/components/rp-delta-badge";
+import { SessionRankSnap } from "@/components/session-rank-snap";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
 import { cn } from "@/lib/utils";
 
@@ -25,23 +27,14 @@ export type TLivePresenceSessionProps = {
   startedAt: string;
   openingRankScore: number | null;
   latestRankScore: number | null;
+  openingRankName: string | null;
+  openingRankDivision: string | null;
+  openingRankIconUrl: string | null;
+  latestRankName: string | null;
+  latestRankDivision: string | null;
+  latestRankIconUrl: string | null;
   legends: string[];
 } | null;
-
-function formatSessionRpDelta(
-  opening: number | null,
-  latest: number | null
-): string | null {
-  if (opening === null || latest === null) {
-    return null;
-  }
-  const d = latest - opening;
-  if (d === 0) {
-    return "0";
-  }
-  const abs = Math.abs(d).toLocaleString();
-  return d > 0 ? `+${abs}` : `−${abs}`;
-}
 
 function platformChipLabel(platform: string): string {
   const value = platform.toLowerCase();
@@ -91,9 +84,9 @@ export function LivePresenceCard(props: {
   });
   const showInGame = evaluation.status === "in_game";
 
-  const rpDelta =
-    session &&
-    formatSessionRpDelta(session.openingRankScore, session.latestRankScore);
+  const sessionRpDelta = session
+    ? computeRankScoreDelta(session.openingRankScore, session.latestRankScore)
+    : null;
   const elapsedMs = session
     ? Math.max(0, nowMs - new Date(session.startedAt).getTime())
     : 0;
@@ -187,10 +180,32 @@ export function LivePresenceCard(props: {
             </div>
             {session ? (
               <dl className="space-y-1.5 text-[11px]">
+                <div className="grid grid-cols-2 gap-2 pb-1">
+                  <SessionRankSnap
+                    label="Start"
+                    snap={{
+                      rankScore: session.openingRankScore,
+                      rankName: session.openingRankName,
+                      rankDivision: session.openingRankDivision,
+                      iconUrl: session.openingRankIconUrl,
+                    }}
+                    compact
+                  />
+                  <SessionRankSnap
+                    label="Now"
+                    snap={{
+                      rankScore: session.latestRankScore,
+                      rankName: session.latestRankName,
+                      rankDivision: session.latestRankDivision,
+                      iconUrl: session.latestRankIconUrl,
+                    }}
+                    compact
+                  />
+                </div>
                 <div className="flex justify-between gap-2">
                   <dt className="text-muted-foreground shrink-0">RP change</dt>
-                  <dd className="text-right font-medium tabular-nums text-foreground">
-                    {rpDelta !== null ? `${rpDelta} RP` : "—"}
+                  <dd className="flex justify-end text-right">
+                    <RpDeltaBadge delta={sessionRpDelta} />
                   </dd>
                 </div>
                 <div className="flex justify-between gap-2">

@@ -149,8 +149,21 @@ create table if not exists play_sessions (
   started_at timestamptz not null default now(),
   ended_at timestamptz,
   opening_rank_score integer,
-  latest_rank_score integer
+  latest_rank_score integer,
+  opening_rank_name text,
+  opening_rank_division text,
+  opening_rank_icon_url text,
+  latest_rank_name text,
+  latest_rank_division text,
+  latest_rank_icon_url text
 );
+
+alter table play_sessions add column if not exists opening_rank_name text;
+alter table play_sessions add column if not exists opening_rank_division text;
+alter table play_sessions add column if not exists opening_rank_icon_url text;
+alter table play_sessions add column if not exists latest_rank_name text;
+alter table play_sessions add column if not exists latest_rank_division text;
+alter table play_sessions add column if not exists latest_rank_icon_url text;
 
 create index if not exists idx_play_sessions_account_started
   on play_sessions (tracked_account_id, started_at desc);

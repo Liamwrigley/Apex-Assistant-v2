@@ -19,7 +19,7 @@ import {
   getOpenSessionSummariesForTrackedAccountIds,
   getRankMovers24h,
   getRankTimelinesByTrackedAccountIds,
-  getRecentCompletedSessionsByGuild,
+  getRecentCompletedSessions,
   listTrackedAccounts,
 } from "@apex-assistant/db";
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
@@ -110,6 +110,12 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       startedAt: string;
       openingRankScore: number | null;
       latestRankScore: number | null;
+      openingRankName: string | null;
+      openingRankDivision: string | null;
+      openingRankIconUrl: string | null;
+      latestRankName: string | null;
+      latestRankDivision: string | null;
+      latestRankIconUrl: string | null;
       legends: string[];
     }
   >;
@@ -121,6 +127,12 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     endedAt: string;
     openingRankScore: number | null;
     latestRankScore: number | null;
+    openingRankName: string | null;
+    openingRankDivision: string | null;
+    openingRankIconUrl: string | null;
+    latestRankName: string | null;
+    latestRankDivision: string | null;
+    latestRankIconUrl: string | null;
     legends: string[];
   }>;
 }> {
@@ -191,9 +203,7 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
   const allTrackedAccountIds = trackedAccounts.map((r) => r.id);
   const [openSessionSummaries, recentSessionsRaw] = await Promise.all([
     getOpenSessionSummariesForTrackedAccountIds(allTrackedAccountIds),
-    guildFilter
-      ? getRecentCompletedSessionsByGuild(guildFilter, 20)
-      : Promise.resolve([]),
+    getRecentCompletedSessions(20),
   ]);
 
   const openSessionByTrackedId: Record<
@@ -202,6 +212,12 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       startedAt: string;
       openingRankScore: number | null;
       latestRankScore: number | null;
+      openingRankName: string | null;
+      openingRankDivision: string | null;
+      openingRankIconUrl: string | null;
+      latestRankName: string | null;
+      latestRankDivision: string | null;
+      latestRankIconUrl: string | null;
       legends: string[];
     }
   > = {};
@@ -210,6 +226,12 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       startedAt: toIso(s.startedAt),
       openingRankScore: s.openingRankScore,
       latestRankScore: s.latestRankScore,
+      openingRankName: s.openingRankName,
+      openingRankDivision: s.openingRankDivision,
+      openingRankIconUrl: s.openingRankIconUrl,
+      latestRankName: s.latestRankName,
+      latestRankDivision: s.latestRankDivision,
+      latestRankIconUrl: s.latestRankIconUrl,
       legends: s.legends,
     };
   }
@@ -222,6 +244,12 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     endedAt: toIso(r.endedAt),
     openingRankScore: r.openingRankScore,
     latestRankScore: r.latestRankScore,
+    openingRankName: r.openingRankName,
+    openingRankDivision: r.openingRankDivision,
+    openingRankIconUrl: r.openingRankIconUrl,
+    latestRankName: r.latestRankName,
+    latestRankDivision: r.latestRankDivision,
+    latestRankIconUrl: r.latestRankIconUrl,
     legends: r.legends,
   }));
 
