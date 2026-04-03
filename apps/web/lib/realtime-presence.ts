@@ -1,12 +1,14 @@
-export type TRealtimePresenceInput = {
+import {
+  type TDerivedPresenceStatus,
+  derivePresenceFromRealtimeFields,
+  type TRealtimePresenceFields,
+} from "@apex-assistant/core";
+
+export type TRealtimePresenceInput = TRealtimePresenceFields & {
   realtimeUpdatedAt: string | null;
-  realtimeIsOnline: number | null;
-  realtimeIsInGame: number | null;
-  realtimeCurrentState: string | null;
-  realtimeCurrentStateAsText: string | null;
 };
 
-export type TDerivedPresenceStatus = "offline" | "online" | "in_game" | "unknown";
+export type { TDerivedPresenceStatus };
 
 export type TPresenceEvaluation = {
   isFresh: boolean;
@@ -15,10 +17,6 @@ export type TPresenceEvaluation = {
   shouldShow: boolean;
   reason: string;
 };
-
-function includesAny(value: string, needles: string[]): boolean {
-  return needles.some((needle) => value.includes(needle));
-}
 
 export function evaluateRealtimePresence(
   input: TRealtimePresenceInput,
@@ -46,72 +44,31 @@ export function evaluateRealtimePresence(
     };
   }
 
-  const stateText = `${input.realtimeCurrentStateAsText ?? ""} ${input.realtimeCurrentState ?? ""}`
-    .trim()
-    .toLowerCase();
-  const isInGameFlag = input.realtimeIsInGame === 1;
-  const isOnlineFlag = input.realtimeIsOnline === 1;
+  const derived = derivePresenceFromRealtimeFields({
+    realtimeIsOnline: input.realtimeIsOnline,
+    realtimeIsInGame: input.realtimeIsInGame,
+    realtimeCurrentState: input.realtimeCurrentState,
+    realtimeCurrentStateAsText: input.realtimeCurrentStateAsText
+  });
 
-  // Online flag is the primary signal.
-  if (isOnlineFlag && isInGameFlag) {
-    return {
-      isFresh: true,
-      ageMs,
-      status: "in_game",
-      shouldShow: true,
-      reason: "online_and_in_game_flags"
-    };
-  }
-
-  if (isOnlineFlag) {
-    return {
-      isFresh: true,
-      ageMs,
-      status: "online",
-      shouldShow: true,
-      reason: "is_online_flag"
-    };
-  }
-
-  const stateSuggestsOffline = includesAny(stateText, ["offline", "afk", "disconnected", "not online"]);
-  if (!isOnlineFlag && stateSuggestsOffline) {
-    return {
-      isFresh: true,
-      ageMs,
-      status: "offline",
-      shouldShow: false,
-      reason: "state_text_offline"
-    };
-  }
-
-  const stateSuggestsInGame = includesAny(stateText, ["in game", "match", "firing range", "ingame"]);
-  if (stateSuggestsInGame) {
-    return {
-      isFresh: true,
-      ageMs,
-      status: "in_game",
-      shouldShow: true,
-      reason: "state_text_in_game"
-    };
-  }
-
-  // In-game without online is treated as provider inconsistency; hide.
-  if (isInGameFlag && !isOnlineFlag) {
-    return {
-      isFresh: true,
-      ageMs,
-      status: "offline",
-      shouldShow: false,
-      reason: "in_game_without_online_flag"
-    };
-  }
+  const reasonFromDerived = (): string => {
+    if (derived.shouldShow && derived.status === "in_game") {
+      return "derived_in_game";
+    }
+    if (derived.shouldShow) {
+      return "derived_online";
+    }
+    if (derived.status === "offline") {
+      return "derived_offline";
+    }
+    return "derived_unknown";
+  };
 
   return {
     isFresh: true,
     ageMs,
-    status: "offline",
-    shouldShow: false,
-    reason: "all_presence_flags_negative"
+    status: derived.status,
+    shouldShow: derived.shouldShow,
+    reason: reasonFromDerived()
   };
 }
-

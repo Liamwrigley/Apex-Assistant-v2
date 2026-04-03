@@ -1,4 +1,11 @@
-import { AppError, getStatsProvider, type TTrackedAccount } from "@apex-assistant/core";
+import {
+  AppError,
+  derivePresenceFromRealtimeFields,
+  getStatsProvider,
+  toRealtimePresenceFieldsFromRankRealtime,
+  toRealtimePresenceFieldsFromTrackedAccount,
+  type TTrackedAccount
+} from "@apex-assistant/core";
 import {
   autoLinkTrackedAccountByExactFingerprint,
   claimNextDueTrackedAccount,
@@ -7,6 +14,7 @@ import {
   insertRankSnapshot,
   listTrackedAccountsByGuild,
   releaseTrackedAccountClaim,
+  syncPlaySessionIngest,
   updateTrackedAccountIgnIfChanged,
   updateTrackedAccountCurrentRank,
   updateTrackedAccountLiveStats,
@@ -132,6 +140,16 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       careerKills: rank.careerKills ?? null,
       careerDamage: rank.careerDamage ?? null,
       careerWins: rank.careerWins ?? null
+    });
+    const prevPresence = derivePresenceFromRealtimeFields(toRealtimePresenceFieldsFromTrackedAccount(account));
+    const nextPresence = derivePresenceFromRealtimeFields(toRealtimePresenceFieldsFromRankRealtime(rank.realtime));
+    await syncPlaySessionIngest({
+      trackedAccountId: account.id,
+      prevActive: prevPresence.shouldShow,
+      nextActive: nextPresence.shouldShow,
+      nextStatus: nextPresence.status,
+      rankScore: rank.rankScore,
+      selectedLegend: rank.realtime?.selectedLegend ?? null
     });
     await updateTrackedAccountLiveStats({
       trackedAccountId: account.id,

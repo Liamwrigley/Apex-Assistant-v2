@@ -1,11 +1,9 @@
-import dotenv from "dotenv";
-import { resolve } from "node:path";
 import {
   AppError,
   SlidingWindowLimiter,
   assertOwnerOrAdmin,
   getStatsProvider,
-  type TPlatform
+  type TPlatform,
 } from "@apex-assistant/core";
 import {
   addTrackedAccount,
@@ -14,7 +12,7 @@ import {
   listTrackedAccountsByOwner,
   pool,
   searchTrackedAccountsByOwner,
-  upsertUser
+  upsertUser,
 } from "@apex-assistant/db";
 import {
   ActionRowBuilder,
@@ -27,9 +25,11 @@ import {
   Routes,
   SlashCommandBuilder,
   StringSelectMenuBuilder,
-  StringSelectMenuInteraction
+  StringSelectMenuInteraction,
 } from "discord.js";
+import dotenv from "dotenv";
 import { createServer } from "node:http";
+import { resolve } from "node:path";
 
 dotenv.config({ path: resolve(process.cwd(), "../../.env") });
 
@@ -43,10 +43,12 @@ if (!token || !clientId) {
 
 const limiter = new SlidingWindowLimiter(
   Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60000),
-  Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? 60)
+  Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? 60),
 );
 /** Railway / PaaS set PORT; local dev can use DISCORD_BOT_PORT. */
-const healthPort = Number(process.env.PORT ?? process.env.DISCORD_BOT_PORT ?? 4300);
+const healthPort = Number(
+  process.env.PORT ?? process.env.DISCORD_BOT_PORT ?? 4300,
+);
 const statsProvider = getStatsProvider();
 const selectCache = new Map<
   string,
@@ -54,7 +56,12 @@ const selectCache = new Map<
     guildId: string;
     ownerUserId: string;
     expiresAt: number;
-    options: Array<{ ign: string; platform: TPlatform; label: string; externalPlayerId?: string | null }>;
+    options: Array<{
+      ign: string;
+      platform: TPlatform;
+      label: string;
+      externalPlayerId?: string | null;
+    }>;
   }
 >();
 
@@ -65,7 +72,7 @@ const selectCache = new Map<
  * - /track remove — account owner OR server Administrator; removes one tracked row by id.
  * - /dashboard — any member; posts the public web dashboard URL.
  */
-const DEFAULT_DASHBOARD_URL = "https://apex-assistant-v2-web-one.vercel.app";
+const DEFAULT_DASHBOARD_URL = "https://apex-assistant.xyz";
 
 const commands = [
   new SlashCommandBuilder()
@@ -75,7 +82,12 @@ const commands = [
       sub
         .setName("add")
         .setDescription("Find and track your account.")
-        .addStringOption((opt) => opt.setName("query").setDescription("Name to search").setRequired(true))
+        .addStringOption((opt) =>
+          opt
+            .setName("query")
+            .setDescription("Name to search")
+            .setRequired(true),
+        )
         .addStringOption((opt) =>
           opt
             .setName("platform")
@@ -84,17 +96,22 @@ const commands = [
             .addChoices(
               { name: "PC (Origin/Steam)", value: "origin" },
               { name: "PS4 (PlayStation)", value: "psn" },
-              { name: "X1 (Xbox)", value: "xbl" }
-            )
-        )
+              { name: "X1 (Xbox)", value: "xbl" },
+            ),
+        ),
     )
     .addSubcommand((sub) =>
       sub
         .setName("add-uid")
-        .setDescription("Track an account directly by provider UUID (auto-detect platform).")
-        .addStringOption((opt) =>
-          opt.setName("uid").setDescription("Provider UUID (external player id)").setRequired(true)
+        .setDescription(
+          "Track an account directly by provider UUID (auto-detect platform).",
         )
+        .addStringOption((opt) =>
+          opt
+            .setName("uid")
+            .setDescription("Provider UUID (external player id)")
+            .setRequired(true),
+        ),
     )
     .addSubcommand((sub) =>
       sub
@@ -105,13 +122,15 @@ const commands = [
             .setName("id")
             .setDescription("Tracked account id")
             .setRequired(true)
-            .setAutocomplete(true)
-        )
+            .setAutocomplete(true),
+        ),
     )
-    .addSubcommand((sub) => sub.setName("list").setDescription("List your tracked accounts.")),
+    .addSubcommand((sub) =>
+      sub.setName("list").setDescription("List your tracked accounts."),
+    ),
   new SlashCommandBuilder()
     .setName("dashboard")
-    .setDescription("Get the link to the Apex Assistant web dashboard.")
+    .setDescription("Get the link to the Apex Assistant web dashboard."),
 ].map((command) => command.toJSON());
 
 /**
@@ -125,7 +144,9 @@ async function syncSlashCommandsWithDiscord(): Promise<void> {
 
   if (singleGuild) {
     await rest.put(Routes.applicationCommands(id), { body: [] });
-    await rest.put(Routes.applicationGuildCommands(id, singleGuild), { body: commands });
+    await rest.put(Routes.applicationGuildCommands(id, singleGuild), {
+      body: commands,
+    });
     console.log(`[discord] Slash commands synced for guild ${singleGuild}.`);
     return;
   }
@@ -133,13 +154,19 @@ async function syncSlashCommandsWithDiscord(): Promise<void> {
   await rest.put(Routes.applicationCommands(id), { body: [] });
   let count = 0;
   for (const g of client.guilds.cache.values()) {
-    await rest.put(Routes.applicationGuildCommands(id, g.id), { body: commands });
+    await rest.put(Routes.applicationGuildCommands(id, g.id), {
+      body: commands,
+    });
     count += 1;
   }
-  console.log(`[discord] Slash commands synced in ${count} guild(s) (guild-scoped, immediate).`);
+  console.log(
+    `[discord] Slash commands synced in ${count} guild(s) (guild-scoped, immediate).`,
+  );
 }
 
-async function handleTrack(interaction: ChatInputCommandInteraction): Promise<void> {
+async function handleTrack(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   const subcommand = interaction.options.getSubcommand();
   const effectiveGuildId = interaction.guildId ?? guildId ?? "dm";
   const userId = interaction.user.id;
@@ -147,17 +174,32 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
 
   if (subcommand === "add" || subcommand === "add-uid") {
     await interaction.deferReply({ ephemeral: true });
-    const platform = interaction.options.getString("platform", false) as TPlatform | null;
-    const query = subcommand === "add" ? interaction.options.getString("query", true) : null;
-    const uid = subcommand === "add-uid" ? interaction.options.getString("uid", true).trim() : null;
+    const platform = interaction.options.getString(
+      "platform",
+      false,
+    ) as TPlatform | null;
+    const query =
+      subcommand === "add"
+        ? interaction.options.getString("query", true)
+        : null;
+    const uid =
+      subcommand === "add-uid"
+        ? interaction.options.getString("uid", true).trim()
+        : null;
 
     const maxByUser = Number(process.env.MAX_TRACKED_ACCOUNTS_PER_USER ?? 5);
-    const maxByGuild = Number(process.env.MAX_TRACKED_ACCOUNTS_PER_GUILD ?? 100);
+    const maxByGuild = Number(
+      process.env.MAX_TRACKED_ACCOUNTS_PER_GUILD ?? 100,
+    );
     const ownerCount = await countTrackedByOwner(effectiveGuildId, userId);
     const guildCount = await countTrackedByGuild(effectiveGuildId);
 
     if (ownerCount >= maxByUser) {
-      throw new AppError("You reached your tracked account limit.", 400, "USER_LIMIT");
+      throw new AppError(
+        "You reached your tracked account limit.",
+        400,
+        "USER_LIMIT",
+      );
     }
     if (guildCount >= maxByGuild) {
       throw new AppError("Guild tracking limit reached.", 400, "GUILD_LIMIT");
@@ -165,10 +207,16 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
 
     if (subcommand === "add-uid") {
       if (!uid) {
-        throw new AppError("uid is required for /track add-uid.", 400, "UID_REQUIRED");
+        throw new AppError(
+          "uid is required for /track add-uid.",
+          400,
+          "UID_REQUIRED",
+        );
       }
 
-      const probePlatforms: TPlatform[] = platform ? [platform] : ["origin", "psn", "xbl"];
+      const probePlatforms: TPlatform[] = platform
+        ? [platform]
+        : ["origin", "psn", "xbl"];
       let resolvedPlatform: TPlatform | null = null;
       let resolvedIgn: string | null = null;
       for (const probe of probePlatforms) {
@@ -176,7 +224,7 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
           const rank = await statsProvider.getRank({
             ign: uid,
             platform: probe,
-            externalPlayerId: uid
+            externalPlayerId: uid,
           });
           resolvedPlatform = probe;
           resolvedIgn = (rank.playerName ?? "").trim() || uid;
@@ -186,12 +234,16 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
         }
       }
       if (!resolvedPlatform || !resolvedIgn) {
-        throw new AppError("Could not resolve this uid on PC/PS4/X1.", 404, "UID_NOT_FOUND");
+        throw new AppError(
+          "Could not resolve this uid on PC/PS4/X1.",
+          404,
+          "UID_NOT_FOUND",
+        );
       }
 
       await upsertUser({
         discordUserId: userId,
-        displayName: interaction.user.globalName ?? interaction.user.username
+        displayName: interaction.user.globalName ?? interaction.user.username,
       });
       const created = await addTrackedAccount({
         guildId: effectiveGuildId,
@@ -199,17 +251,17 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
         ign: resolvedIgn,
         platform: resolvedPlatform,
         externalPlayerId: uid,
-        externalSource: statsProvider.name
+        externalSource: statsProvider.name,
       });
       await interaction.editReply(
-        `Now tracking ${created.ign} (${created.platform}) via uid \`${uid}\` with id \`${created.id}\`.`
+        `Now tracking ${created.ign} (${created.platform}) via uid \`${uid}\` with id \`${created.id}\`.`,
       );
       return;
     }
 
     const candidates = await statsProvider.searchPlayers({
       query: query ?? "",
-      platform: platform ?? undefined
+      platform: platform ?? undefined,
     });
 
     if (candidates.length === 0) {
@@ -218,7 +270,7 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
           statsProvider.name === "trn"
             ? "No TRN candidates found. Try another query or specify a platform."
             : "No candidates found from ApexLegendsAPI. Try exact name or specify platform.",
-        components: []
+        components: [],
       });
       return;
     }
@@ -227,7 +279,7 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
       const candidate = candidates[0];
       await upsertUser({
         discordUserId: userId,
-        displayName: interaction.user.globalName ?? interaction.user.username
+        displayName: interaction.user.globalName ?? interaction.user.username,
       });
       const created = await addTrackedAccount({
         guildId: effectiveGuildId,
@@ -235,9 +287,11 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
         ign: candidate.handle,
         platform: candidate.platform,
         externalPlayerId: candidate.externalPlayerId ?? null,
-        externalSource: statsProvider.name
+        externalSource: statsProvider.name,
       });
-      await interaction.editReply(`Now tracking ${created.ign} (${created.platform}) with id \`${created.id}\`.`);
+      await interaction.editReply(
+        `Now tracking ${created.ign} (${created.platform}) with id \`${created.id}\`.`,
+      );
       return;
     }
 
@@ -250,8 +304,8 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
         ign: candidate.handle,
         platform: candidate.platform,
         label: `${candidate.displayName} (${candidate.platform})`,
-        externalPlayerId: candidate.externalPlayerId ?? null
-      }))
+        externalPlayerId: candidate.externalPlayerId ?? null,
+      })),
     });
 
     const menu = new StringSelectMenuBuilder()
@@ -262,15 +316,20 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
       .addOptions(
         candidates.slice(0, 25).map((candidate, index) => ({
           label: `${candidate.displayName}`.slice(0, 90),
-          description: `${candidate.platform} | ${candidate.handle}`.slice(0, 90),
-          value: String(index)
-        }))
+          description: `${candidate.platform} | ${candidate.handle}`.slice(
+            0,
+            90,
+          ),
+          value: String(index),
+        })),
       );
-    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      menu,
+    );
 
     await interaction.editReply({
       content: "I found multiple matches. Pick the correct account:",
-      components: [row]
+      components: [row],
     });
     return;
   }
@@ -278,8 +337,8 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
   if (subcommand === "remove") {
     const id = interaction.options.getString("id", true);
     const existing = await pool.query<{ ownerUserId: string }>(
-      "select owner_user_id as \"ownerUserId\" from tracked_accounts where id = $1 and guild_id = $2",
-      [id, effectiveGuildId]
+      'select owner_user_id as "ownerUserId" from tracked_accounts where id = $1 and guild_id = $2',
+      [id, effectiveGuildId],
     );
     if (existing.rowCount === 0) {
       throw new AppError("Tracked account not found.", 404, "NOT_FOUND");
@@ -288,7 +347,7 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
     assertOwnerOrAdmin({
       ownerUserId: existing.rows[0].ownerUserId,
       requesterUserId: userId,
-      isAdmin: interaction.memberPermissions?.has("Administrator") ?? false
+      isAdmin: interaction.memberPermissions?.has("Administrator") ?? false,
     });
 
     await pool.query("delete from tracked_accounts where id = $1", [id]);
@@ -304,29 +363,33 @@ async function handleTrack(interaction: ChatInputCommandInteraction): Promise<vo
           .map(
             (row) =>
               `- \`${row.id}\` ${row.ign} (${row.platform})` +
-              (row.externalPlayerId ? ` uid:${row.externalPlayerId}` : "")
+              (row.externalPlayerId ? ` uid:${row.externalPlayerId}` : ""),
           )
           .join("\n");
   await interaction.reply(message);
 }
 
-async function handleDashboard(interaction: ChatInputCommandInteraction): Promise<void> {
+async function handleDashboard(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   const effectiveGuildId = interaction.guildId ?? guildId ?? "dm";
   limiter.assertAllowed(`${effectiveGuildId}:${interaction.user.id}:dashboard`);
   const raw = (process.env.DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL).trim();
   const url = raw.replace(/\/$/, "");
   await interaction.reply({
     content: `**Apex Assistant dashboard**\n${url}`,
-    allowedMentions: { parse: [] }
+    allowedMentions: { parse: [] },
   });
 }
 
-async function handleTrackAddSelection(interaction: StringSelectMenuInteraction): Promise<void> {
+async function handleTrackAddSelection(
+  interaction: StringSelectMenuInteraction,
+): Promise<void> {
   const cached = selectCache.get(interaction.customId);
   if (!cached || cached.expiresAt < Date.now()) {
     await interaction.update({
       content: "This selection expired. Run `/track add` again.",
-      components: []
+      components: [],
     });
     return;
   }
@@ -334,7 +397,7 @@ async function handleTrackAddSelection(interaction: StringSelectMenuInteraction)
   if (cached.ownerUserId !== interaction.user.id) {
     await interaction.reply({
       content: "Only the original requester can use this selector.",
-      ephemeral: true
+      ephemeral: true,
     });
     return;
   }
@@ -344,17 +407,24 @@ async function handleTrackAddSelection(interaction: StringSelectMenuInteraction)
   if (!selected) {
     await interaction.update({
       content: "Invalid selection. Run `/track add` again.",
-      components: []
+      components: [],
     });
     return;
   }
 
   const maxByUser = Number(process.env.MAX_TRACKED_ACCOUNTS_PER_USER ?? 5);
   const maxByGuild = Number(process.env.MAX_TRACKED_ACCOUNTS_PER_GUILD ?? 100);
-  const ownerCount = await countTrackedByOwner(cached.guildId, interaction.user.id);
+  const ownerCount = await countTrackedByOwner(
+    cached.guildId,
+    interaction.user.id,
+  );
   const guildCount = await countTrackedByGuild(cached.guildId);
   if (ownerCount >= maxByUser) {
-    throw new AppError("You reached your tracked account limit.", 400, "USER_LIMIT");
+    throw new AppError(
+      "You reached your tracked account limit.",
+      400,
+      "USER_LIMIT",
+    );
   }
   if (guildCount >= maxByGuild) {
     throw new AppError("Guild tracking limit reached.", 400, "GUILD_LIMIT");
@@ -366,21 +436,26 @@ async function handleTrackAddSelection(interaction: StringSelectMenuInteraction)
     ign: selected.ign,
     platform: selected.platform,
     externalPlayerId: selected.externalPlayerId ?? null,
-    externalSource: statsProvider.name
+    externalSource: statsProvider.name,
   });
   await upsertUser({
     discordUserId: interaction.user.id,
-    displayName: interaction.user.globalName ?? interaction.user.username
+    displayName: interaction.user.globalName ?? interaction.user.username,
   });
   selectCache.delete(interaction.customId);
   await interaction.update({
     content: `Now tracking ${created.ign} (${created.platform}) with id \`${created.id}\`.`,
-    components: []
+    components: [],
   });
 }
 
-async function handleTrackRemoveAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
-  if (interaction.commandName !== "track" || interaction.options.getSubcommand() !== "remove") {
+async function handleTrackRemoveAutocomplete(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  if (
+    interaction.commandName !== "track" ||
+    interaction.options.getSubcommand() !== "remove"
+  ) {
     await interaction.respond([]);
     return;
   }
@@ -391,13 +466,13 @@ async function handleTrackRemoveAutocomplete(interaction: AutocompleteInteractio
     guildId: effectiveGuildId,
     ownerUserId: interaction.user.id,
     query: focused.value,
-    limit: 25
+    limit: 25,
   });
   await interaction.respond(
     rows.map((row) => ({
       name: `${row.ign} (${row.platform})`,
-      value: row.id
-    }))
+      value: row.id,
+    })),
   );
 }
 
@@ -409,11 +484,14 @@ function isUnknownInteractionError(error: unknown): boolean {
 
 async function safeInteractionErrorResponse(
   interaction: ChatInputCommandInteraction | StringSelectMenuInteraction,
-  message: string
+  message: string,
 ): Promise<void> {
   try {
     if (interaction.deferred || interaction.replied) {
-      await interaction.followUp({ content: `Error: ${message}`, ephemeral: true });
+      await interaction.followUp({
+        content: `Error: ${message}`,
+        ephemeral: true,
+      });
       return;
     }
     await interaction.reply({ content: `Error: ${message}`, ephemeral: true });
@@ -432,7 +510,10 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId.startsWith("track-add:")) {
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId.startsWith("track-add:")
+    ) {
       await handleTrackAddSelection(interaction);
       return;
     }
@@ -480,9 +561,15 @@ client.on("guildCreate", (guild) => {
   }
   const rest = new REST({ version: "10" }).setToken(token as string);
   void rest
-    .put(Routes.applicationGuildCommands(clientId as string, guild.id), { body: commands })
-    .then(() => console.log(`[discord] Slash commands synced for new guild ${guild.id}.`))
-    .catch((error: unknown) => console.error("[discord] Slash sync for new guild failed", error));
+    .put(Routes.applicationGuildCommands(clientId as string, guild.id), {
+      body: commands,
+    })
+    .then(() =>
+      console.log(`[discord] Slash commands synced for new guild ${guild.id}.`),
+    )
+    .catch((error: unknown) =>
+      console.error("[discord] Slash sync for new guild failed", error),
+    );
 });
 
 void client.login(token).catch((error: unknown) => {

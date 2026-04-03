@@ -142,3 +142,35 @@ create table if not exists identity_link_events (
 
 create index if not exists idx_identity_link_events_account_created
   on identity_link_events (tracked_account_id, created_at desc);
+
+create table if not exists play_sessions (
+  id uuid primary key default gen_random_uuid(),
+  tracked_account_id uuid not null references tracked_accounts(id) on delete cascade,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  opening_rank_score integer,
+  latest_rank_score integer
+);
+
+create index if not exists idx_play_sessions_account_started
+  on play_sessions (tracked_account_id, started_at desc);
+
+create index if not exists idx_play_sessions_ended
+  on play_sessions (ended_at desc);
+
+create unique index if not exists uq_play_sessions_one_open_per_account
+  on play_sessions (tracked_account_id)
+  where ended_at is null;
+
+create table if not exists play_session_legends (
+  id uuid primary key default gen_random_uuid(),
+  play_session_id uuid not null references play_sessions(id) on delete cascade,
+  legend text not null,
+  first_seen_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now(),
+  seen_polls integer not null default 1,
+  unique (play_session_id, legend)
+);
+
+create index if not exists idx_play_session_legends_session
+  on play_session_legends (play_session_id);

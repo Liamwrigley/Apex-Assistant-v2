@@ -1,5 +1,7 @@
 import { AutoRefresh } from "@/components/auto-refresh";
 import { LeaderboardCard } from "@/components/leaderboard-card";
+import { LivePresenceCard } from "@/components/live-presence-card";
+import { RecentSessionsSection } from "@/components/recent-sessions-section";
 import { TrackedAccountsOwnerTable } from "@/components/tracked-accounts-owner-table";
 import {
   Card,
@@ -14,8 +16,10 @@ import {
 } from "@/lib/service-base-urls";
 import {
   getLeaderboardWithDelta24h,
+  getOpenSessionSummariesForTrackedAccountIds,
   getRankMovers24h,
   getRankTimelinesByTrackedAccountIds,
+  getRecentCompletedSessionsByGuild,
   listTrackedAccounts,
 } from "@apex-assistant/db";
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
@@ -73,13 +77,6 @@ function toIso(d: Date | string): string {
   return d instanceof Date ? d.toISOString() : String(d);
 }
 
-function getLegendIconUrl(legend: string | null | undefined): string | null {
-  if (!legend || !legend.trim()) {
-    return null;
-  }
-  return `https://api.mozambiquehe.re/assets/icons/${encodeURIComponent(legend.toLowerCase())}.png`;
-}
-
 /** One live-presence card per linked crossplay identity; solo rows use their own id. */
 function presenceDedupeKey(row: TTrackedRow): string {
   if (row.identityGroupId) {
@@ -87,31 +84,6 @@ function presenceDedupeKey(row: TTrackedRow): string {
   }
   // Fallback dedupe for pre-linked rows: same owner + normalized IGN.
   return `owner:${row.ownerUserId}\0ign:${row.ign.trim().toLowerCase()}`;
-}
-
-function platformChipLabel(platform: string): string {
-  const value = platform.toLowerCase();
-  if (value === "origin" || value === "pc") {
-    return "PC";
-  }
-  if (value === "psn" || value === "ps4") {
-    return "PS";
-  }
-  if (value === "xbl" || value === "x1") {
-    return "XBOX";
-  }
-  return platform.toUpperCase();
-}
-
-/** Hide provider state labels that contradict “this player is visible in Live Presence”. */
-function isOfflineLikeStateLabel(text: string | null | undefined): boolean {
-  if (!text?.trim()) {
-    return false;
-  }
-  const t = text.trim().toLowerCase();
-  return ["offline", "afk", "disconnected", "not online"].some((frag) =>
-    t.includes(frag),
-  );
 }
 
 type TStatsMover = {
@@ -132,6 +104,25 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     highestGainer: TStatsMover | null;
     biggestLoser: TStatsMover | null;
   };
+  openSessionByTrackedId: Record<
+    string,
+    {
+      startedAt: string;
+      openingRankScore: number | null;
+      latestRankScore: number | null;
+      legends: string[];
+    }
+  >;
+  recentSessions: Array<{
+    sessionId: string;
+    ign: string;
+    platform: string;
+    startedAt: string;
+    endedAt: string;
+    openingRankScore: number | null;
+    latestRankScore: number | null;
+    legends: string[];
+  }>;
 }> {
   const [leaderboardRows, trackedAccounts, stats24h] = await Promise.all([
     getLeaderboardWithDelta24h(guildFilter),
@@ -197,6 +188,43 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     currentRankIconUrl: row.currentRankIconUrl ?? null,
   }));
 
+  const allTrackedAccountIds = trackedAccounts.map((r) => r.id);
+  const [openSessionSummaries, recentSessionsRaw] = await Promise.all([
+    getOpenSessionSummariesForTrackedAccountIds(allTrackedAccountIds),
+    guildFilter
+      ? getRecentCompletedSessionsByGuild(guildFilter, 20)
+      : Promise.resolve([]),
+  ]);
+
+  const openSessionByTrackedId: Record<
+    string,
+    {
+      startedAt: string;
+      openingRankScore: number | null;
+      latestRankScore: number | null;
+      legends: string[];
+    }
+  > = {};
+  for (const s of openSessionSummaries) {
+    openSessionByTrackedId[s.trackedAccountId] = {
+      startedAt: toIso(s.startedAt),
+      openingRankScore: s.openingRankScore,
+      latestRankScore: s.latestRankScore,
+      legends: s.legends,
+    };
+  }
+
+  const recentSessions = recentSessionsRaw.map((r) => ({
+    sessionId: r.sessionId,
+    ign: r.ign,
+    platform: r.platform,
+    startedAt: toIso(r.startedAt),
+    endedAt: toIso(r.endedAt),
+    openingRankScore: r.openingRankScore,
+    latestRankScore: r.latestRankScore,
+    legends: r.legends,
+  }));
+
   pageLog("dashboard db load", {
     guildFilter: guildFilter ?? null,
     leaderboardCount: leaderboard.length,
@@ -240,7 +268,14 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       : null,
   };
 
-  return { leaderboard, tracked, timelines, stats24h: stats24hDisplay };
+  return {
+    leaderboard,
+    tracked,
+    timelines,
+    stats24h: stats24hDisplay,
+    openSessionByTrackedId,
+    recentSessions,
+  };
 }
 
 type TServiceHealthRow = {
@@ -321,8 +356,15 @@ export default async function HomePage() {
     guildId,
     guildFilter: guildFilter ?? "all guilds",
   });
-  const { leaderboard, tracked, timelines, stats24h } =
-    await loadDashboardFromDb(guildFilter);
+  const {
+    leaderboard,
+    tracked,
+    timelines,
+    stats24h,
+    openSessionByTrackedId,
+    recentSessions,
+  } = await loadDashboardFromDb(guildFilter);
+  const nowMs = Date.now();
   const serviceHealth = await fetchServiceHealth();
   const workerHealth = serviceHealth.find((item) => item.name === "worker");
   const discordHealth = serviceHealth.find((item) => item.name === "discord");
@@ -623,102 +665,27 @@ export default async function HomePage() {
         <Card>
           <CardHeader>
             <CardTitle>Live Presence</CardTitle>
-            <CardDescription>Realtime player activity.</CardDescription>
+            <CardDescription>
+              Realtime activity and the current online session (RP and legends while
+              active).
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {informativeRealtimeRows.map((row) => {
-                const legendIconUrl = getLegendIconUrl(
-                  row.realtimeSelectedLegend,
-                );
-                const heroIconUrl = legendIconUrl ?? row.currentRankIconUrl;
-                const evaluation = evaluateRealtimePresence({
-                  realtimeUpdatedAt: row.realtimeUpdatedAt,
-                  realtimeIsOnline: row.realtimeIsOnline,
-                  realtimeIsInGame: row.realtimeIsInGame,
-                  realtimeCurrentState: row.realtimeCurrentState,
-                  realtimeCurrentStateAsText: row.realtimeCurrentStateAsText,
-                });
-                const showInGame = evaluation.status === "in_game";
-                return (
-                  <div
-                    key={row.id}
-                    className="bg-muted/20 flex min-h-[260px] flex-col overflow-hidden rounded-md border p-2"
-                  >
-                    {heroIconUrl ? (
-                      <img
-                        src={heroIconUrl}
-                        alt={
-                          row.realtimeSelectedLegend ??
-                          row.currentRankName ??
-                          "Player"
-                        }
-                        className="h-40 w-full object-cover"
-                      />
-                    ) : (
-                      <div className="bg-muted h-40 w-full" />
-                    )}
-                    <div className="min-w-0 flex-1 px-1 pt-2">
-                      <div className="truncate text-sm font-medium">
-                        {row.ign}
-                      </div>
-                      <div className="text-muted-foreground mt-0.5 truncate text-xs">
-                        {typeof row.currentLevel === "number"
-                          ? `Lv ${row.currentLevel}`
-                          : ""}
-                      </div>
-                      {row.currentRankName ? (
-                        <div className="mt-1 flex items-center gap-1.5">
-                          {row.currentRankIconUrl ? (
-                            <img
-                              src={row.currentRankIconUrl}
-                              alt=""
-                              className="h-4 w-4 shrink-0 object-contain"
-                            />
-                          ) : null}
-                          <span className="text-muted-foreground truncate text-[11px]">
-                            {row.currentRankName}
-                            {row.currentRankDivision
-                              ? ` ${row.currentRankDivision}`
-                              : ""}
-                          </span>
-                        </div>
-                      ) : null}
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] text-violet-300">
-                          {platformChipLabel(row.platform)}
-                        </span>
-                        {showInGame ? (
-                          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
-                            In Game
-                          </span>
-                        ) : null}
-                        {row.realtimeCanJoin === 1 ? (
-                          <span className="rounded bg-indigo-500/15 px-1.5 py-0.5 text-[10px] text-indigo-300">
-                            Joinable
-                          </span>
-                        ) : null}
-                        {row.realtimeCurrentStateAsText &&
-                        !isOfflineLikeStateLabel(row.realtimeCurrentStateAsText) ? (
-                          <span className="text-muted-foreground rounded bg-white/5 px-1.5 py-0.5 text-[10px]">
-                            {row.realtimeCurrentStateAsText}
-                          </span>
-                        ) : null}
-                        {row.realtimeLobbyState ? (
-                          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">
-                            Lobby: {row.realtimeLobbyState}
-                          </span>
-                        ) : null}
-                        {/* No "Online" chip: rows here are already treated as visible/active. */}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {informativeRealtimeRows.map((row) => (
+                <LivePresenceCard
+                  key={row.id}
+                  row={row}
+                  session={openSessionByTrackedId[row.id] ?? null}
+                  nowMs={nowMs}
+                />
+              ))}
             </div>
           </CardContent>
         </Card>
       ) : null}
+
+      <RecentSessionsSection rows={recentSessions} />
 
       <Card>
         <CardHeader>
@@ -748,3 +715,4 @@ export default async function HomePage() {
     </main>
   );
 }
+
