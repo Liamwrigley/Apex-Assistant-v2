@@ -116,11 +116,11 @@ export function RecentSessionsSection(props: { rows: TRecentSessionRow[] }) {
                   <td className="px-2 py-2 align-middle">
                     <RpDeltaBadge delta={rpDelta} />
                   </td>
-                  <td className="px-2 py-2 align-top">
+                  <td className="px-2 py-2 align-middle">
                     {row.legends.length === 0 ? (
                       <span className="text-muted-foreground">—</span>
                     ) : (
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap items-center gap-1">
                         {row.legends.map((name) => {
                           const iconUrl = getLegendIconUrl(name);
                           return (
