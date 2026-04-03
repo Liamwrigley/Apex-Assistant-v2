@@ -153,6 +153,7 @@ export function PlayerTimelineSparkline(props: {
       setTooltipLeftPx(null);
       return;
     }
+    const dotX = hoverDotX;
 
     const area = chartAreaRef.current;
     if (!area) {
@@ -160,18 +161,19 @@ export function PlayerTimelineSparkline(props: {
     }
 
     function layout() {
+      const areaEl = chartAreaRef.current;
       const tip = tooltipRef.current;
-      if (!tip) {
+      if (!areaEl || !tip) {
         return;
       }
-      const chartW = area.clientWidth;
+      const chartW = areaEl.clientWidth;
       const tipW = tip.getBoundingClientRect().width;
       if (tipW < 4) {
         requestAnimationFrame(layout);
         return;
       }
       const pad = 6;
-      const centerX = (hoverDotX / dimensions.width) * chartW;
+      const centerX = (dotX / dimensions.width) * chartW;
       let left = centerX - tipW / 2;
       if (left < pad) {
         left = pad;
