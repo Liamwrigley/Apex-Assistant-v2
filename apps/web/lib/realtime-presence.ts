@@ -18,9 +18,12 @@ export type TPresenceEvaluation = {
   reason: string;
 };
 
+/** Same window used to decide if realtime fields count as “live” presence. */
+export const REALTIME_PRESENCE_MAX_AGE_MINUTES = 15;
+
 export function evaluateRealtimePresence(
   input: TRealtimePresenceInput,
-  maxAgeMinutes = 15
+  maxAgeMinutes = REALTIME_PRESENCE_MAX_AGE_MINUTES
 ): TPresenceEvaluation {
   if (!input.realtimeUpdatedAt) {
     return {

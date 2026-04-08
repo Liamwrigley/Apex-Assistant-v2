@@ -27,8 +27,8 @@ async function unlinkAction(formData: FormData): Promise<void> {
     trackedAccountId,
     reason: "manual_unlink_admin_ui"
   });
-  revalidatePath("/admin/identity");
-  redirect(`/admin/identity?key=${encodeURIComponent(key)}`);
+  revalidatePath("/debug/identity");
+  redirect(`/debug/identity?key=${encodeURIComponent(key)}`);
 }
 
 export default async function IdentityAdminPage(props: {
@@ -113,4 +113,3 @@ export default async function IdentityAdminPage(props: {
     </main>
   );
 }
-

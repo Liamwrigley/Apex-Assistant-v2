@@ -118,6 +118,14 @@ const ACCOUNT_FIELDS_TA_LIST = `
   ta.realtime_updated_at as "realtimeUpdatedAt"
 `;
 
+export async function getTrackedAccountById(id: string): Promise<TTrackedAccount | null> {
+  const result = await pool.query<TTrackedAccount>(
+    `select ${ACCOUNT_FIELDS} from tracked_accounts where id = $1`,
+    [id]
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function addTrackedAccount(input: TTrackInsert): Promise<TTrackedAccount> {
   const existingByExternalId =
     input.externalPlayerId && input.externalSource
@@ -708,13 +716,13 @@ export async function unlinkTrackedAccount(params: {
 
 export async function claimNextDueTrackedAccount(params: {
   pollMinutes: number;
-  onlinePollMinutes?: number;
+  onlinePollSeconds?: number;
   leaseSeconds: number;
   workerId: string;
   guildId?: string;
 }): Promise<TTrackedAccount | null> {
   const pollMinutes = Math.max(1, Math.trunc(params.pollMinutes));
-  const onlinePollMinutes = Math.max(1, Math.trunc(params.onlinePollMinutes ?? Math.min(2, pollMinutes)));
+  const onlinePollSeconds = Math.max(15, Math.trunc(params.onlinePollSeconds ?? pollMinutes * 60));
   const leaseSeconds = Math.max(30, Math.trunc(params.leaseSeconds));
   const withGuildFilter = typeof params.guildId === "string" && params.guildId.length > 0;
 
@@ -730,7 +738,7 @@ export async function claimNextDueTrackedAccount(params: {
           or (
             case
               when coalesce(realtime_is_in_game, 0) = 1 or coalesce(realtime_is_online, 0) = 1
-                then last_checked_at <= now() - ($2::int * interval '1 minute')
+                then last_checked_at <= now() - ($2::int * interval '1 second')
               else last_checked_at <= now() - ($1::int * interval '1 minute')
             end
           )
@@ -749,7 +757,7 @@ export async function claimNextDueTrackedAccount(params: {
     where ta.id = candidate.id
     returning ${ACCOUNT_FIELDS_TA}
     `,
-    [pollMinutes, onlinePollMinutes, withGuildFilter ? params.guildId : null, leaseSeconds, params.workerId]
+    [pollMinutes, onlinePollSeconds, withGuildFilter ? params.guildId : null, leaseSeconds, params.workerId]
   );
   return result.rows[0] ?? null;
 }
@@ -777,7 +785,7 @@ export async function getIngestionQueueStats(guildId?: string): Promise<{
 }> {
   const withGuildFilter = typeof guildId === "string" && guildId.length > 0;
   const pollMinutes = Number(process.env.INGEST_POLL_MINUTES ?? 5);
-  const onlinePollMinutes = Number(process.env.INGEST_POLL_MINUTES_ONLINE ?? Math.max(1, Math.min(2, pollMinutes)));
+  const onlinePollSeconds = Number(process.env.INGEST_POLL_SECONDS_ONLINE ?? 30);
   const result = await pool.query<{
     activeCount: string;
     dueCount: string;
@@ -795,7 +803,7 @@ export async function getIngestionQueueStats(guildId?: string): Promise<{
             last_checked_at is null
             or (
               (coalesce(realtime_is_in_game, 0) = 1 or coalesce(realtime_is_online, 0) = 1)
-              and last_checked_at <= now() - ($3::int * interval '1 minute')
+              and last_checked_at <= now() - ($3::int * interval '1 second')
             )
             or (
               coalesce(realtime_is_in_game, 0) <> 1
@@ -808,7 +816,7 @@ export async function getIngestionQueueStats(guildId?: string): Promise<{
         where is_active = true
           and (coalesce(realtime_is_in_game, 0) = 1 or coalesce(realtime_is_online, 0) = 1)
           and (ingest_claimed_until is null or ingest_claimed_until < now())
-          and (last_checked_at is null or last_checked_at <= now() - ($3::int * interval '1 minute'))
+          and (last_checked_at is null or last_checked_at <= now() - ($3::int * interval '1 second'))
       )::text as "dueOnlineCount",
       count(*) filter (
         where is_active = true
@@ -828,7 +836,7 @@ export async function getIngestionQueueStats(guildId?: string): Promise<{
     [
       withGuildFilter ? guildId : null,
       Math.max(1, Math.trunc(pollMinutes)),
-      Math.max(1, Math.trunc(onlinePollMinutes))
+      Math.max(15, Math.trunc(onlinePollSeconds))
     ]
   );
 

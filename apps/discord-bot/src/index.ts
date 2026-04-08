@@ -267,9 +267,7 @@ async function handleTrack(
     if (candidates.length === 0) {
       await interaction.editReply({
         content:
-          statsProvider.name === "trn"
-            ? "No TRN candidates found. Try another query or specify a platform."
-            : "No candidates found from ApexLegendsAPI. Try exact name or specify platform.",
+          "No candidates found. Try exact name or specify platform.",
         components: [],
       });
       return;

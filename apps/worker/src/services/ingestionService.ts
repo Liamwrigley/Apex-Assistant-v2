@@ -1,5 +1,4 @@
 import {
-  AppError,
   derivePresenceFromRealtimeFields,
   getStatsProvider,
   toRealtimePresenceFieldsFromRankRealtime,
@@ -9,25 +8,23 @@ import {
 import {
   autoLinkTrackedAccountByExactFingerprint,
   claimNextDueTrackedAccount,
+  getLatestRankScoreForAccount,
   hasIgnConflictForDifferentExternalId,
   insertPlayerStatsSnapshot,
   insertRankSnapshot,
+  insertPresenceSnapshotIfChanged,
   listTrackedAccountsByGuild,
   releaseTrackedAccountClaim,
   syncPlaySessionIngest,
   updateTrackedAccountIgnIfChanged,
   updateTrackedAccountCurrentRank,
   updateTrackedAccountLiveStats,
-  updateTrackedAccountLastCheckedAt,
-  upsertMatch
+  updateTrackedAccountLastCheckedAt
 } from "@apex-assistant/db";
-import { fetchRecentMatches } from "../providers/matchClient.js";
+import { syncGameSegment } from "./gameSegmentService.js";
+import { getRankedMap } from "./mapRotationService.js";
 
 const statsProvider = getStatsProvider();
-
-function hasMatchProviderConfig(): boolean {
-  return Boolean(process.env.MATCH_API_BASE_URL && process.env.MATCH_API_KEY);
-}
 
 type TIngestionHealth = {
   provider: string;
@@ -120,13 +117,25 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
         });
       }
     }
+    const previousScore = await getLatestRankScoreForAccount(account.id);
+    const scoreChanged = previousScore !== null && previousScore !== rank.rankScore;
+
+    let mapForSnapshot: { rankedMapCode: string; rankedMapName: string } | undefined;
+    if (scoreChanged) {
+      const mapInfo = await getRankedMap();
+      if (mapInfo) {
+        mapForSnapshot = { rankedMapCode: mapInfo.mapCode, rankedMapName: mapInfo.mapName };
+      }
+    }
+
     await insertRankSnapshot({
       trackedAccountId: account.id,
       rankScore: rank.rankScore,
       rankName: rank.rankName,
       rankDivision: rank.rankDivision,
       iconUrl: rank.iconUrl,
-      source: statsProvider.name
+      source: statsProvider.name,
+      ...mapForSnapshot
     });
     await updateTrackedAccountCurrentRank({
       trackedAccountId: account.id,
@@ -154,6 +163,24 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       rankIconUrl: rank.iconUrl ?? null,
       selectedLegend: rank.realtime?.selectedLegend ?? null
     });
+    await insertPresenceSnapshotIfChanged({
+      trackedAccountId: account.id,
+      selectedLegend: rank.realtime?.selectedLegend ?? null,
+      isInGame: nextPresence.status === "in_game",
+      lobbyState: rank.realtime?.lobbyState ?? null,
+      currentState: rank.realtime?.currentState ?? null,
+      currentStateAsText: rank.realtime?.currentStateAsText ?? null,
+      derivedStatus: nextPresence.status
+    });
+    await syncGameSegment({
+      trackedAccountId: account.id,
+      nextPresenceStatus: nextPresence.status,
+      nextActive: nextPresence.shouldShow,
+      rankScore: rank.rankScore,
+      selectedLegend: rank.realtime?.selectedLegend ?? null,
+      rankName: rank.rankName,
+      rankDivision: rank.rankDivision ?? null
+    });
     await updateTrackedAccountLiveStats({
       trackedAccountId: account.id,
       currentLevel: rank.currentLevel ?? null,
@@ -168,30 +195,6 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
     });
     await updateTrackedAccountLastCheckedAt(account.id);
     recordProviderHealth(statsProvider.name, true);
-
-    if (hasMatchProviderConfig()) {
-      try {
-        const matches = await fetchRecentMatches({ ign: account.ign, platform: account.platform });
-        for (const match of matches) {
-          await upsertMatch({
-            trackedAccountId: account.id,
-            providerMatchId: match.id,
-            playedAt: new Date(match.playedAt),
-            mode: match.mode,
-            placement: match.placement,
-            kills: match.kills,
-            assists: match.assists,
-            knocks: match.knocks,
-            damage: match.damage,
-            survivalTimeSec: match.survivalTimeSec,
-            rawPayload: match.rawPayload
-          });
-        }
-        recordProviderHealth("match_api", true);
-      } catch (error) {
-        recordProviderHealth("match_api", false, error instanceof Error ? error.message : "Failed to fetch match details.");
-      }
-    }
     console.log(
       `[worker] player sync ok guild=${account.guildId} account=${account.id} player=${account.ign} platform=${account.platform} source=${statsProvider.name} elapsed_ms=${Date.now() - startedAt}`
     );
@@ -200,27 +203,21 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
     console.error(
       `[worker] player sync failed guild=${account.guildId} account=${account.id} player=${account.ign} platform=${account.platform} source=${statsProvider.name} elapsed_ms=${Date.now() - startedAt} error="${message}"`
     );
-    recordProviderHealth(
-      error instanceof AppError && (error.code.includes("TRN") || error.code.includes("APEX_API"))
-        ? statsProvider.name
-        : "match_api",
-      false,
-      message
-    );
+    recordProviderHealth(statsProvider.name, false, message);
     throw error;
   }
 }
 
 export async function ingestNextDueTrackedAccount(params: {
   pollMinutes: number;
-  onlinePollMinutes?: number;
+  onlinePollSeconds?: number;
   leaseSeconds: number;
   workerId: string;
   guildId?: string;
 }): Promise<{ processed: boolean; accountId?: string; failed?: boolean }> {
   const account = await claimNextDueTrackedAccount({
     pollMinutes: params.pollMinutes,
-    onlinePollMinutes: params.onlinePollMinutes,
+    onlinePollSeconds: params.onlinePollSeconds,
     leaseSeconds: params.leaseSeconds,
     workerId: params.workerId,
     guildId: params.guildId

@@ -183,6 +183,14 @@ export async function syncPlaySessionIngest(input: {
   }
 }
 
+export async function getOpenSessionId(trackedAccountId: string): Promise<string | null> {
+  const result = await pool.query<{ id: string }>(
+    `select id from play_sessions where tracked_account_id = $1 and ended_at is null limit 1`,
+    [trackedAccountId]
+  );
+  return result.rows[0]?.id ?? null;
+}
+
 export async function getOpenSessionSummariesForTrackedAccountIds(
   trackedAccountIds: string[]
 ): Promise<TOpenSessionSummary[]> {
@@ -371,6 +379,21 @@ export async function getRecentCompletedSessionsByGuild(
     limit $2
     `,
     [guildId, limit]
+  );
+  return mapSessionsWithLegends(sessions.rows);
+}
+
+export async function getRecentCompletedSessionsByAccount(
+  trackedAccountId: string,
+  limit = 30
+): Promise<TRecentCompletedSessionRow[]> {
+  const sessions = await pool.query<TCompletedSessionRow>(
+    `${completedSessionsBaseSql}
+    and ps.tracked_account_id = $1
+    order by ps.ended_at desc
+    limit $2
+    `,
+    [trackedAccountId, limit]
   );
   return mapSessionsWithLegends(sessions.rows);
 }

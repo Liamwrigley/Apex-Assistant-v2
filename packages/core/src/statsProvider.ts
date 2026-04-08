@@ -1,7 +1,6 @@
 import { AppError, type TPlatform } from "./types.js";
-import { fetchTrnRank, searchTrnPlayers, type TTrnSearchCandidate } from "./trnClient.js";
 
-export type TStatsProviderName = "trn" | "apexlegendsapi";
+export type TStatsProviderName = "apexlegendsapi";
 
 export type TStatsRank = {
   rankScore: number;
@@ -27,7 +26,12 @@ export type TStatsRank = {
   };
 };
 
-export type TStatsSearchCandidate = TTrnSearchCandidate;
+export type TStatsSearchCandidate = {
+  platform: TPlatform;
+  handle: string;
+  displayName: string;
+  externalPlayerId?: string | null;
+};
 
 export type IStatsProvider = {
   readonly name: TStatsProviderName;
@@ -256,17 +260,7 @@ async function searchApexLegendsApiPlayers(input: {
   return candidates;
 }
 
-export function getStatsProvider(providerName = process.env.STATS_PROVIDER): IStatsProvider {
-  const selected = (providerName?.toLowerCase() as TStatsProviderName | undefined) ?? "apexlegendsapi";
-
-  if (selected === "trn") {
-    return {
-      name: "trn",
-      getRank: fetchTrnRank,
-      searchPlayers: searchTrnPlayers
-    };
-  }
-
+export function getStatsProvider(): IStatsProvider {
   return {
     name: "apexlegendsapi",
     getRank: fetchApexLegendsApiRank,

@@ -61,8 +61,11 @@ create table if not exists rank_snapshots (
   rank_name text not null,
   rank_division text,
   icon_url text,
-  source text not null default 'trn'
+  source text not null default 'apexlegendsapi'
 );
+
+alter table rank_snapshots add column if not exists ranked_map_code text;
+alter table rank_snapshots add column if not exists ranked_map_name text;
 
 create index if not exists idx_rank_snapshots_account_captured on rank_snapshots (tracked_account_id, captured_at desc);
 
@@ -79,53 +82,11 @@ create table if not exists player_stat_snapshots (
 create index if not exists idx_player_stat_snapshots_account_captured
   on player_stat_snapshots (tracked_account_id, captured_at desc);
 
-create table if not exists matches (
-  id uuid primary key default gen_random_uuid(),
-  tracked_account_id uuid not null references tracked_accounts(id) on delete cascade,
-  provider text not null default 'match_api',
-  provider_match_id text not null,
-  played_at timestamptz not null,
-  mode text,
-  placement integer,
-  kills integer,
-  assists integer,
-  knocks integer,
-  damage integer,
-  survival_time_sec integer,
-  raw_payload jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now(),
-  unique (tracked_account_id, provider, provider_match_id)
-);
-
-create index if not exists idx_matches_account_played on matches (tracked_account_id, played_at desc);
-
-create table if not exists match_participants (
-  id uuid primary key default gen_random_uuid(),
-  match_id uuid not null references matches(id) on delete cascade,
-  role text,
-  name text,
-  legend text,
-  kills integer,
-  damage integer,
-  team_placement integer,
-  raw_payload jsonb not null default '{}'::jsonb
-);
-
-create table if not exists ingestion_runs (
-  id uuid primary key default gen_random_uuid(),
-  provider text not null,
-  run_type text not null,
-  guild_id text,
-  tracked_account_id uuid references tracked_accounts(id) on delete set null,
-  started_at timestamptz not null default now(),
-  finished_at timestamptz,
-  success boolean not null default false,
-  status_code integer,
-  error_message text,
-  processed_items integer not null default 0
-);
-
-create index if not exists idx_ingestion_runs_provider_started on ingestion_runs (provider, started_at desc);
+-- Removed: matches, match_participants, ingestion_runs tables (no longer used).
+-- Run these manually on existing databases to clean up:
+-- DROP TABLE IF EXISTS match_participants CASCADE;
+-- DROP TABLE IF EXISTS matches CASCADE;
+-- DROP TABLE IF EXISTS ingestion_runs CASCADE;
 
 create table if not exists identity_link_events (
   id uuid primary key default gen_random_uuid(),
@@ -187,3 +148,52 @@ create table if not exists play_session_legends (
 
 create index if not exists idx_play_session_legends_session
   on play_session_legends (play_session_id);
+
+create table if not exists presence_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  tracked_account_id uuid not null references tracked_accounts(id) on delete cascade,
+  captured_at timestamptz not null default now(),
+  selected_legend text,
+  is_in_game boolean not null default false,
+  lobby_state text,
+  current_state text,
+  current_state_as_text text,
+  derived_status text not null default 'offline'
+);
+
+create index if not exists idx_presence_snapshots_account_captured
+  on presence_snapshots (tracked_account_id, captured_at desc);
+
+create table if not exists inferred_game_segments (
+  id uuid primary key default gen_random_uuid(),
+  play_session_id uuid not null references play_sessions(id) on delete cascade,
+  tracked_account_id uuid not null references tracked_accounts(id) on delete cascade,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  legend_assumed text,
+  opening_rank_score integer,
+  closing_rank_score integer,
+  rp_delta integer,
+  confidence text not null default 'low',
+  merge_risk boolean not null default false,
+  trigger_signals jsonb not null default '{}'::jsonb
+);
+
+alter table inferred_game_segments add column if not exists opening_rank_name text;
+alter table inferred_game_segments add column if not exists opening_rank_division text;
+alter table inferred_game_segments add column if not exists closing_rank_name text;
+alter table inferred_game_segments add column if not exists closing_rank_division text;
+alter table inferred_game_segments add column if not exists ranked_map_code_open text;
+alter table inferred_game_segments add column if not exists ranked_map_name_open text;
+alter table inferred_game_segments add column if not exists ranked_map_code_close text;
+alter table inferred_game_segments add column if not exists ranked_map_name_close text;
+
+create index if not exists idx_inferred_game_segments_session
+  on inferred_game_segments (play_session_id, started_at desc);
+
+create index if not exists idx_inferred_game_segments_account
+  on inferred_game_segments (tracked_account_id, started_at desc);
+
+create unique index if not exists uq_inferred_game_segments_one_open_per_account
+  on inferred_game_segments (tracked_account_id)
+  where ended_at is null;

@@ -14,7 +14,7 @@ app.use(express.json());
 /** Railway / PaaS set PORT; local dev can use WORKER_API_PORT. */
 const port = Number(process.env.PORT ?? process.env.WORKER_API_PORT ?? 4100);
 const pollMinutes = Number(process.env.INGEST_POLL_MINUTES ?? 5);
-const onlinePollMinutes = Number(process.env.INGEST_POLL_MINUTES_ONLINE ?? Math.max(1, Math.min(2, pollMinutes)));
+const onlinePollSeconds = Number(process.env.INGEST_POLL_SECONDS_ONLINE ?? 30);
 /** When set, poller only processes that guild; when unset, all guilds (multi-server). */
 const defaultGuildId = process.env.DISCORD_GUILD_ID?.trim() || undefined;
 const debugLogs = (process.env.DEBUG_LOGS ?? "false").toLowerCase() === "true";
@@ -46,7 +46,7 @@ app.get("/health", async (_req, res) => {
     worker: {
       workerId,
       pollMinutes,
-      onlinePollMinutes,
+      onlinePollSeconds,
       leaseSeconds,
       concurrency,
       idleSleepMs
@@ -73,13 +73,6 @@ app.post("/ingest/:guildId", async (req, res) => {
   }
 });
 
-app.post("/webhook/matches", async (req, res) => {
-  // Placeholder endpoint to support provider webhook mode.
-  // In MVP, poller is the primary mode and this can be expanded
-  // once the exact provider payload shape is finalized.
-  res.status(202).json({ accepted: true, received: req.body ? 1 : 0 });
-});
-
 app.listen(port, "0.0.0.0", () => {
   console.log(`Worker API listening on 0.0.0.0:${port}`);
 });
@@ -92,7 +85,7 @@ const runWorkerLoop = async (loopIndex: number) => {
     workerId,
     loopIndex,
     pollMinutes,
-    onlinePollMinutes,
+    onlinePollSeconds,
     leaseSeconds
   });
   while (true) {
@@ -100,7 +93,7 @@ const runWorkerLoop = async (loopIndex: number) => {
       const next = await ingestNextDueTrackedAccount({
         guildId: defaultGuildId,
         pollMinutes,
-          onlinePollMinutes,
+        onlinePollSeconds,
         leaseSeconds,
         workerId: `${workerId}-${loopIndex}`
       });

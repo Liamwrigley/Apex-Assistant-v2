@@ -11,19 +11,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  getDiscordBotBaseUrl,
-  getWorkerBaseUrl,
-} from "@/lib/service-base-urls";
-import {
   getLeaderboardWithDelta24h,
   getOpenSessionSummariesForTrackedAccountIds,
   getRankMovers24h,
   getRankTimelinesByTrackedAccountIds,
   getRecentCompletedSessions,
+  getSegmentsBySession,
   listTrackedAccounts,
 } from "@apex-assistant/db";
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
-import Image from "next/image";
 
 export const dynamic = "force-dynamic";
 const debugLogs = (process.env.DEBUG_LOGS ?? "false").toLowerCase() === "true";
@@ -203,7 +199,7 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
   const allTrackedAccountIds = trackedAccounts.map((r) => r.id);
   const [openSessionSummaries, recentSessionsRaw] = await Promise.all([
     getOpenSessionSummariesForTrackedAccountIds(allTrackedAccountIds),
-    getRecentCompletedSessions(20),
+    getRecentCompletedSessions(200),
   ]);
 
   const openSessionByTrackedId: Record<
@@ -236,8 +232,17 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     };
   }
 
+  const sessionIds = recentSessionsRaw.map((r) => r.sessionId);
+  const segmentsBySession: Record<string, Awaited<ReturnType<typeof getSegmentsBySession>>> = {};
+  await Promise.all(
+    sessionIds.map(async (sid) => {
+      segmentsBySession[sid] = await getSegmentsBySession(sid);
+    })
+  );
+
   const recentSessions = recentSessionsRaw.map((r) => ({
     sessionId: r.sessionId,
+    trackedAccountId: r.trackedAccountId,
     ign: r.ign,
     platform: r.platform,
     startedAt: toIso(r.startedAt),
@@ -251,6 +256,12 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     latestRankDivision: r.latestRankDivision,
     latestRankIconUrl: r.latestRankIconUrl,
     legends: r.legends,
+    estimatedGames: (segmentsBySession[r.sessionId] ?? []).map((seg) => ({
+      legend: seg.legendAssumed,
+      rpDelta: seg.rpDelta,
+      confidence: seg.confidence,
+      mergeRisk: seg.mergeRisk,
+    })),
   }));
 
   pageLog("dashboard db load", {
@@ -306,76 +317,6 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
   };
 }
 
-type TServiceHealthRow = {
-  name: "worker" | "discord";
-  baseUrl: string;
-  healthUrl: string;
-  up: boolean;
-  status: number;
-  latencyMs: number;
-  body: Record<string, unknown> | null;
-};
-
-async function fetchServiceHealth(): Promise<TServiceHealthRow[]> {
-  const workerBaseUrl = getWorkerBaseUrl();
-  const discordBaseUrl = getDiscordBotBaseUrl();
-
-  const check = async (
-    name: "worker" | "discord",
-    baseUrl: string,
-  ): Promise<TServiceHealthRow> => {
-    const healthUrl = `${baseUrl.replace(/\/$/, "")}/health`;
-    const startedAt = Date.now();
-    try {
-      const response = await fetch(healthUrl, { cache: "no-store" });
-      const latencyMs = Date.now() - startedAt;
-      const body = response.ok
-        ? ((await response.json()) as Record<string, unknown>)
-        : null;
-      return {
-        name,
-        baseUrl,
-        healthUrl,
-        up: response.ok,
-        status: response.status,
-        latencyMs,
-        body,
-      };
-    } catch {
-      return {
-        name,
-        baseUrl,
-        healthUrl,
-        up: false,
-        status: 0,
-        latencyMs: Date.now() - startedAt,
-        body: null,
-      };
-    }
-  };
-
-  return Promise.all([
-    check("worker", workerBaseUrl),
-    check("discord", discordBaseUrl),
-  ]);
-}
-
-function healthStatusTooltip(
-  row: TServiceHealthRow | undefined,
-): string | undefined {
-  if (!row) {
-    return undefined;
-  }
-  const origin = row.baseUrl.replace(/\/$/, "");
-  const detail = row.up
-    ? `${row.latencyMs} ms · HTTP ${row.status}`
-    : "Unreachable or error";
-  const lines = [`GET ${row.healthUrl}`, detail, `Base: ${origin}`];
-  if (row.name === "worker") {
-    lines.push(`Sync Now: POST ${origin}/ingest/{guildId}`);
-  }
-  return lines.join("\n");
-}
 
 export default async function HomePage() {
   const guildId = process.env.DISCORD_GUILD_ID ?? "";
@@ -393,19 +334,6 @@ export default async function HomePage() {
     recentSessions,
   } = await loadDashboardFromDb(guildFilter);
   const nowMs = Date.now();
-  const serviceHealth = await fetchServiceHealth();
-  const workerHealth = serviceHealth.find((item) => item.name === "worker");
-  const discordHealth = serviceHealth.find((item) => item.name === "discord");
-  const workerQueue =
-    workerHealth?.body &&
-    typeof workerHealth.body === "object" &&
-    "queue" in workerHealth.body
-      ? (workerHealth.body.queue as {
-          activeCount?: number;
-          dueCount?: number;
-          claimedCount?: number;
-        })
-      : null;
   const top = leaderboard[0] ?? null;
   const trackedByOwner = tracked.reduce(
     (acc, row) => {
@@ -470,88 +398,12 @@ export default async function HomePage() {
   pageLog("render data summary", {
     leaderboardCount: leaderboard.length,
     trackedCount: tracked.length,
-    hasWorkerHealth: Boolean(workerHealth?.up),
+    hasTimelines: Object.keys(timelines).length > 0,
   });
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <AutoRefresh intervalMs={60_000} />
-      <section className="space-y-2">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Image
-              src="/logo.png"
-              alt="Apex Assistant logo"
-              width={44}
-              height={44}
-              className="rounded-full"
-              priority
-            />
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight">
-                Apex Assistant
-              </h1>
-              <p className="text-muted-foreground text-sm">
-                Live tracker dashboard
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="text-muted-foreground flex items-center gap-3 text-xs">
-              <span
-                className="inline-flex cursor-help items-center gap-1.5"
-                title={healthStatusTooltip(workerHealth)}
-              >
-                <span
-                  className={`inline-block h-2 w-2 rounded-full ${workerHealth?.up ? "bg-emerald-400" : "bg-rose-400"}`}
-                />
-                <span className="inline-flex items-center gap-1.5">
-                  <span>Worker</span>
-                  {workerQueue ? (
-                    <>
-                      <span
-                        className={
-                          (workerQueue.dueCount ?? 0) > 0
-                            ? "text-amber-300"
-                            : "text-muted-foreground"
-                        }
-                        title="Due accounts (ready to be polled)"
-                      >
-                        D:{workerQueue.dueCount ?? 0}
-                      </span>
-                      <span
-                        className={
-                          (workerQueue.claimedCount ?? 0) > 0
-                            ? "text-cyan-300"
-                            : "text-muted-foreground"
-                        }
-                        title="Currently claimed by workers"
-                      >
-                        C:{workerQueue.claimedCount ?? 0}
-                      </span>
-                      <span
-                        className="text-muted-foreground"
-                        title="Total active tracked accounts"
-                      >
-                        A:{workerQueue.activeCount ?? 0}
-                      </span>
-                    </>
-                  ) : null}
-                </span>
-              </span>
-              <span
-                className="inline-flex cursor-help items-center gap-1.5"
-                title={healthStatusTooltip(discordHealth)}
-              >
-                <span
-                  className={`inline-block h-2 w-2 rounded-full ${discordHealth?.up ? "bg-emerald-400" : "bg-rose-400"}`}
-                />
-                <span>Discord</span>
-              </span>
-            </div>
-          </div>
-        </div>
-      </section>
 
       <section className="grid gap-3 md:grid-cols-5">
         <Card className="border-emerald-500/20 bg-emerald-500/5">

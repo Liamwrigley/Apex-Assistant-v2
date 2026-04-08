@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
 import { formatDurationMs } from "@/lib/format-duration";
 import { computeRankScoreDelta, RpDeltaBadge } from "@/components/rp-delta-badge";
@@ -118,9 +119,9 @@ export function LivePresenceCard(props: {
         <div className="min-h-[200px] flex-[2]" aria-hidden />
         <div className="flex flex-none flex-col gap-2 p-2.5">
           <div className={cn(glassPanelClass, "px-2.5 py-2")}>
-            <div className="truncate text-sm font-medium text-foreground">
+            <Link href={`/player/${row.id}`} className="block truncate text-sm font-medium text-foreground hover:underline">
               {row.ign}
-            </div>
+            </Link>
             <div className="text-muted-foreground mt-0.5 truncate text-xs">
               {typeof row.currentLevel === "number"
                 ? `Lv ${row.currentLevel}`

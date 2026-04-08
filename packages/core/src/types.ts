@@ -9,6 +9,8 @@ export type TRankSnapshot = {
   rankDivision: string | null;
   iconUrl: string | null;
   source: string;
+  rankedMapCode: string | null;
+  rankedMapName: string | null;
 };
 
 export type TTrackedAccount = {
@@ -55,22 +57,6 @@ export type TPlayerStatSnapshot = {
   careerKills: number | null;
   careerDamage: number | null;
   careerWins: number | null;
-};
-
-export type TMatch = {
-  id: string;
-  trackedAccountId: string;
-  provider: "match_api";
-  providerMatchId: string;
-  playedAt: Date;
-  mode: string | null;
-  placement: number | null;
-  kills: number | null;
-  assists: number | null;
-  knocks: number | null;
-  damage: number | null;
-  survivalTimeSec: number | null;
-  rawPayload: Record<string, unknown>;
 };
 
 export type TTrackRequest = {

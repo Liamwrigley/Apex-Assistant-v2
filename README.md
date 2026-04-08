@@ -5,7 +5,7 @@ Hybrid Apex Legends tracker with a Vercel-first UI/API, Railway ingestion worker
 ## Monorepo layout
 
 - `apps/web`: Next.js dashboard + API routes (Vercel target).
-- `apps/worker`: Ingestion worker (TRN polling + match provider ingest) and webhook entrypoints.
+- `apps/worker`: Ingestion worker (ApexLegendsAPI polling, game segment inference).
 - `apps/discord-bot`: Discord slash commands for tracking and leaderboard access.
 - `packages/core`: Shared domain types, guardrails, retry, and rate-limit helpers.
 - `packages/db`: PostgreSQL schema, migration script, and repositories.
@@ -13,7 +13,6 @@ Hybrid Apex Legends tracker with a Vercel-first UI/API, Railway ingestion worker
 ## Quick start
 
 1. Copy `.env.example` to `.env` and fill secrets.
-   - Set `STATS_PROVIDER=apexlegendsapi` (default) or `trn`.
 2. Install dependencies:
    - `npm install`
 3. Apply DB schema:
@@ -45,9 +44,7 @@ Hybrid Apex Legends tracker with a Vercel-first UI/API, Railway ingestion worker
 - `apps/worker/railway.toml` is included with build/start/healthcheck defaults.
 - Required env vars:
   - `DATABASE_URL`
-  - `TRN_API_KEY`
-  - `MATCH_API_KEY`
-  - `MATCH_API_BASE_URL`
+  - `APEXLEGENDSAPI_KEY`
   - `APP_SHARED_SECRET`
   - `DISCORD_GUILD_ID` (optional default polling target)
   - `WORKER_API_PORT` (Railway sets `PORT`; map if desired)
@@ -75,8 +72,6 @@ Hybrid Apex Legends tracker with a Vercel-first UI/API, Railway ingestion worker
 - `POST /api/track`
 - `DELETE /api/track/:id`
 - `GET /api/leaderboard?guildId=...`
-- `GET /api/player/:platform/:ign/matches?guildId=...`
-
 Identity headers expected by protected routes:
 - `x-user-id`
 - `x-guild-id`
@@ -85,10 +80,8 @@ Identity headers expected by protected routes:
 
 ## Notes
 
-- Rank snapshots use a pluggable stats provider (`STATS_PROVIDER`):
-  - `apexlegendsapi` (default)
-  - `trn` (kept for easy swap)
-- Match-level history is ingested from a second provider through polling and webhook-ready endpoints.
+- Stats provider is ApexLegendsAPI only.
+- Game segments are inferred from rank snapshots and presence changes (no match history API).
 - Ownership rules enforce that members can only remove their own tracked accounts unless they are admins.
 - Worker health endpoint: `GET /health`.
 - Discord bot health endpoint: `GET /health` on `DISCORD_BOT_PORT`.

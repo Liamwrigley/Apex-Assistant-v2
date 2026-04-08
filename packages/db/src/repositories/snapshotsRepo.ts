@@ -8,6 +8,8 @@ type TSnapshotInsert = {
   rankDivision: string | null;
   iconUrl: string | null;
   source: string;
+  rankedMapCode?: string | null;
+  rankedMapName?: string | null;
 };
 
 type TPlayerStatsSnapshotInsert = {
@@ -21,8 +23,8 @@ type TPlayerStatsSnapshotInsert = {
 export async function insertRankSnapshot(input: TSnapshotInsert): Promise<TRankSnapshot> {
   const result = await pool.query<TRankSnapshot>(
     `
-    insert into rank_snapshots (tracked_account_id, rank_score, rank_name, rank_division, icon_url, source)
-    values ($1, $2, $3, $4, $5, $6)
+    insert into rank_snapshots (tracked_account_id, rank_score, rank_name, rank_division, icon_url, source, ranked_map_code, ranked_map_name)
+    values ($1, $2, $3, $4, $5, $6, $7, $8)
     returning
       id,
       tracked_account_id as "trackedAccountId",
@@ -31,11 +33,25 @@ export async function insertRankSnapshot(input: TSnapshotInsert): Promise<TRankS
       rank_name as "rankName",
       rank_division as "rankDivision",
       icon_url as "iconUrl",
-      source
+      source,
+      ranked_map_code as "rankedMapCode",
+      ranked_map_name as "rankedMapName"
     `,
-    [input.trackedAccountId, input.rankScore, input.rankName, input.rankDivision, input.iconUrl, input.source]
+    [
+      input.trackedAccountId, input.rankScore, input.rankName, input.rankDivision,
+      input.iconUrl, input.source, input.rankedMapCode ?? null, input.rankedMapName ?? null
+    ]
   );
   return result.rows[0];
+}
+
+export async function getLatestRankScoreForAccount(trackedAccountId: string): Promise<number | null> {
+  const result = await pool.query<{ rankScore: number }>(
+    `select rank_score as "rankScore" from rank_snapshots
+     where tracked_account_id = $1 order by captured_at desc limit 1`,
+    [trackedAccountId]
+  );
+  return result.rows[0]?.rankScore ?? null;
 }
 
 export async function insertPlayerStatsSnapshot(input: TPlayerStatsSnapshotInsert): Promise<TPlayerStatSnapshot> {
@@ -327,5 +343,85 @@ export async function getRankMovers24h(guildId?: string): Promise<{
   return {
     highestGainer,
     biggestLoser: loserCandidate && loserCandidate.deltaRp < 0 ? loserCandidate : null
+  };
+}
+
+/**
+ * Change in cumulative career stats over roughly `hours` (matches profile range picker).
+ * End = current columns on tracked_accounts; start = latest player_stat_snapshots at or before
+ * (now - hours), else earliest snapshot after that time if none before (sparse syncs may skew).
+ */
+export async function getCareerStatDeltasForTrackedAccount(
+  trackedAccountId: string,
+  hours: number
+): Promise<{
+  deltaKills: number | null;
+  deltaDamage: number | null;
+  deltaWins: number | null;
+}> {
+  const clampedHours = Number.isFinite(hours)
+    ? Math.min(Math.max(Math.trunc(hours), 1), 8760)
+    : 24;
+
+  const result = await pool.query<{
+    endKills: number | null;
+    endDamage: number | null;
+    endWins: number | null;
+    startKills: number | null;
+    startDamage: number | null;
+    startWins: number | null;
+  }>(
+    `
+    with ws as (
+      select (now() - ($2::int * interval '1 hour')) as t
+    ),
+    before_snap as (
+      select pss.career_kills, pss.career_damage, pss.career_wins
+      from player_stat_snapshots pss
+      cross join ws
+      where pss.tracked_account_id = $1::uuid
+        and pss.captured_at <= ws.t
+      order by pss.captured_at desc
+      limit 1
+    ),
+    first_snap as (
+      select pss.career_kills, pss.career_damage, pss.career_wins
+      from player_stat_snapshots pss
+      cross join ws
+      where pss.tracked_account_id = $1::uuid
+        and pss.captured_at > ws.t
+      order by pss.captured_at asc
+      limit 1
+    )
+    select
+      ta.career_kills as "endKills",
+      ta.career_damage as "endDamage",
+      ta.career_wins as "endWins",
+      coalesce(b.career_kills, f.career_kills) as "startKills",
+      coalesce(b.career_damage, f.career_damage) as "startDamage",
+      coalesce(b.career_wins, f.career_wins) as "startWins"
+    from tracked_accounts ta
+    left join before_snap b on true
+    left join first_snap f on true
+    where ta.id = $1::uuid
+    `,
+    [trackedAccountId, clampedHours]
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return { deltaKills: null, deltaDamage: null, deltaWins: null };
+  }
+
+  const diff = (end: number | null, start: number | null): number | null => {
+    if (end === null || start === null) return null;
+    const v = end - start;
+    return Number.isFinite(v) ? v : null;
+  };
+
+  return {
+    deltaKills: diff(row.endKills, row.startKills),
+    deltaDamage: diff(row.endDamage, row.startDamage),
+    deltaWins: diff(row.endWins, row.startWins),
   };
 }

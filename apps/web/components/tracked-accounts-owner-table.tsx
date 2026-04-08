@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -174,7 +175,7 @@ export function TrackedAccountsOwnerTable(props: {
                       {isLinked ? (
                         <LinkedRowRail isFirst={isFirst} isLast={isLast} />
                       ) : null}
-                      <span className="relative z-[2]">{row.ign}</span>
+                      <Link href={`/player/${row.id}`} className="relative z-[2] hover:underline">{row.ign}</Link>
                     </td>
                     <td className="px-2 py-2 uppercase whitespace-nowrap">
                       {row.platform}
