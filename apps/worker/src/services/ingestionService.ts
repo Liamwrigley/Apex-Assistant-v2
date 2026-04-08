@@ -179,7 +179,10 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       rankScore: rank.rankScore,
       selectedLegend: rank.realtime?.selectedLegend ?? null,
       rankName: rank.rankName,
-      rankDivision: rank.rankDivision ?? null
+      rankDivision: rank.rankDivision ?? null,
+      careerKills: rank.careerKills ?? null,
+      careerDamage: rank.careerDamage ?? null,
+      careerWins: rank.careerWins ?? null
     });
     await updateTrackedAccountLiveStats({
       trackedAccountId: account.id,

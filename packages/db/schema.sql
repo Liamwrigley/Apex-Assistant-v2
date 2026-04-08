@@ -188,6 +188,13 @@ alter table inferred_game_segments add column if not exists ranked_map_name_open
 alter table inferred_game_segments add column if not exists ranked_map_code_close text;
 alter table inferred_game_segments add column if not exists ranked_map_name_close text;
 
+alter table inferred_game_segments add column if not exists opening_career_kills integer;
+alter table inferred_game_segments add column if not exists opening_career_damage integer;
+alter table inferred_game_segments add column if not exists opening_career_wins integer;
+alter table inferred_game_segments add column if not exists closing_career_kills integer;
+alter table inferred_game_segments add column if not exists closing_career_damage integer;
+alter table inferred_game_segments add column if not exists closing_career_wins integer;
+
 create index if not exists idx_inferred_game_segments_session
   on inferred_game_segments (play_session_id, started_at desc);
 

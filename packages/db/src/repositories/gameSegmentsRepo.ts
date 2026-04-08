@@ -1,5 +1,33 @@
 import { pool } from "../client.js";
 
+/** Minimum segment length (seconds) to count toward profile/dashboard game stats; below this is treated as menu/lobby noise. Matches worker DURATION_PLAUSIBLE_MIN_SEC (90). */
+export const SEGMENT_STATS_MIN_DURATION_SEC = 90;
+
+type TSegmentStatsInput = {
+  triggerSignals: Record<string, unknown>;
+  rpDelta: number | null;
+  startedAt: Date;
+  endedAt: Date | null;
+};
+
+/**
+ * Whether a closed segment should contribute to legend/map aggregates and “est. games” UI.
+ * Drops: legend-select bridges, zero RP movement, and very short windows.
+ */
+export function segmentCountsAsInferredRankedGame(seg: TSegmentStatsInput): boolean {
+  if (seg.endedAt == null) return true;
+
+  if (seg.triggerSignals?.reason === "legend_change") return false;
+
+  const durationSec =
+    (new Date(seg.endedAt).getTime() - new Date(seg.startedAt).getTime()) / 1000;
+  if (!Number.isFinite(durationSec) || durationSec < SEGMENT_STATS_MIN_DURATION_SEC) return false;
+
+  if (seg.rpDelta === null || seg.rpDelta === 0) return false;
+
+  return true;
+}
+
 export type TInferredGameSegment = {
   id: string;
   playSessionId: string;
@@ -21,6 +49,12 @@ export type TInferredGameSegment = {
   rankedMapNameOpen: string | null;
   rankedMapCodeClose: string | null;
   rankedMapNameClose: string | null;
+  openingCareerKills: number | null;
+  openingCareerDamage: number | null;
+  openingCareerWins: number | null;
+  closingCareerKills: number | null;
+  closingCareerDamage: number | null;
+  closingCareerWins: number | null;
 };
 
 const SEGMENT_FIELDS = `
@@ -43,7 +77,13 @@ const SEGMENT_FIELDS = `
   ranked_map_code_open as "rankedMapCodeOpen",
   ranked_map_name_open as "rankedMapNameOpen",
   ranked_map_code_close as "rankedMapCodeClose",
-  ranked_map_name_close as "rankedMapNameClose"
+  ranked_map_name_close as "rankedMapNameClose",
+  opening_career_kills as "openingCareerKills",
+  opening_career_damage as "openingCareerDamage",
+  opening_career_wins as "openingCareerWins",
+  closing_career_kills as "closingCareerKills",
+  closing_career_damage as "closingCareerDamage",
+  closing_career_wins as "closingCareerWins"
 `;
 
 export async function getOpenSegment(
@@ -68,17 +108,22 @@ export async function openSegment(input: {
   openingRankDivision: string | null;
   rankedMapCode: string | null;
   rankedMapName: string | null;
+  openingCareerKills: number | null;
+  openingCareerDamage: number | null;
+  openingCareerWins: number | null;
 }): Promise<TInferredGameSegment> {
   const result = await pool.query<TInferredGameSegment>(
     `insert into inferred_game_segments (
        play_session_id, tracked_account_id, legend_assumed, opening_rank_score,
-       opening_rank_name, opening_rank_division, ranked_map_code_open, ranked_map_name_open
+       opening_rank_name, opening_rank_division, ranked_map_code_open, ranked_map_name_open,
+       opening_career_kills, opening_career_damage, opening_career_wins
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      returning ${SEGMENT_FIELDS}`,
     [
       input.playSessionId, input.trackedAccountId, input.legendAssumed, input.openingRankScore,
-      input.openingRankName, input.openingRankDivision, input.rankedMapCode, input.rankedMapName
+      input.openingRankName, input.openingRankDivision, input.rankedMapCode, input.rankedMapName,
+      input.openingCareerKills, input.openingCareerDamage, input.openingCareerWins
     ]
   );
   return result.rows[0];
@@ -95,6 +140,9 @@ export async function closeSegment(input: {
   closingRankDivision: string | null;
   rankedMapCode: string | null;
   rankedMapName: string | null;
+  closingCareerKills: number | null;
+  closingCareerDamage: number | null;
+  closingCareerWins: number | null;
 }): Promise<void> {
   await pool.query(
     `update inferred_game_segments
@@ -108,7 +156,10 @@ export async function closeSegment(input: {
        closing_rank_name = $7,
        closing_rank_division = $8,
        ranked_map_code_close = $9,
-       ranked_map_name_close = $10
+       ranked_map_name_close = $10,
+       closing_career_kills = $11,
+       closing_career_damage = $12,
+       closing_career_wins = $13
      where id = $1`,
     [
       input.segmentId,
@@ -120,7 +171,10 @@ export async function closeSegment(input: {
       input.closingRankName,
       input.closingRankDivision,
       input.rankedMapCode,
-      input.rankedMapName
+      input.rankedMapName,
+      input.closingCareerKills,
+      input.closingCareerDamage,
+      input.closingCareerWins
     ]
   );
 }
@@ -179,6 +233,10 @@ export type TLegendAggregate = {
   avgRpDelta: number;
   wins: number;
   losses: number;
+  totalKills: number;
+  totalDamage: number;
+  avgKills: number;
+  avgDamage: number;
 };
 
 export async function getLegendAggregatesByAccount(
@@ -190,17 +248,33 @@ export async function getLegendAggregatesByAccount(
        legend_assumed as "legend",
        count(*)::int as "games",
        coalesce(sum(rp_delta), 0)::int as "totalRpDelta",
-       coalesce(round(avg(rp_delta)), 0)::int as "avgRpDelta",
+       coalesce(round(avg(rp_delta)::numeric, 1), 0)::float as "avgRpDelta",
        count(*) filter (where rp_delta > 0)::int as "wins",
-       count(*) filter (where rp_delta < 0)::int as "losses"
+       count(*) filter (where rp_delta < 0)::int as "losses",
+       coalesce(sum(closing_career_kills - opening_career_kills) filter (
+         where opening_career_kills is not null and closing_career_kills is not null
+       ), 0)::int as "totalKills",
+       coalesce(sum(closing_career_damage - opening_career_damage) filter (
+         where opening_career_damage is not null and closing_career_damage is not null
+       ), 0)::int as "totalDamage",
+       coalesce(round(avg(closing_career_kills - opening_career_kills) filter (
+         where opening_career_kills is not null and closing_career_kills is not null
+       )), 0)::int as "avgKills",
+       coalesce(round(avg(closing_career_damage - opening_career_damage) filter (
+         where opening_career_damage is not null and closing_career_damage is not null
+       )), 0)::int as "avgDamage"
      from inferred_game_segments
      where tracked_account_id = $1
        and ended_at is not null
        and legend_assumed is not null
+       and (trigger_signals->>'reason') is distinct from 'legend_change'
+       and extract(epoch from (ended_at - started_at)) >= $3::double precision
+       and rp_delta is not null
+       and rp_delta <> 0
        and started_at >= now() - ($2::int * interval '1 hour')
      group by legend_assumed
      order by count(*) desc`,
-    [trackedAccountId, hours]
+    [trackedAccountId, hours, SEGMENT_STATS_MIN_DURATION_SEC]
   );
   return result.rows;
 }
@@ -221,15 +295,75 @@ export async function getMapAggregatesByAccount(
        coalesce(ranked_map_name_close, ranked_map_name_open) as "mapName",
        count(*)::int as "games",
        coalesce(sum(rp_delta), 0)::int as "totalRpDelta",
-       coalesce(round(avg(rp_delta)), 0)::int as "avgRpDelta"
+       coalesce(round(avg(rp_delta)::numeric, 1), 0)::float as "avgRpDelta"
      from inferred_game_segments
      where tracked_account_id = $1
        and ended_at is not null
        and coalesce(ranked_map_name_close, ranked_map_name_open) is not null
+       and (trigger_signals->>'reason') is distinct from 'legend_change'
+       and extract(epoch from (ended_at - started_at)) >= $3::double precision
+       and rp_delta is not null
+       and rp_delta <> 0
        and started_at >= now() - ($2::int * interval '1 hour')
      group by coalesce(ranked_map_name_close, ranked_map_name_open)
      order by count(*) desc`,
-    [trackedAccountId, hours]
+    [trackedAccountId, hours, SEGMENT_STATS_MIN_DURATION_SEC]
+  );
+  return result.rows;
+}
+
+export type TMapLegendAggregate = {
+  mapName: string;
+  legend: string;
+  games: number;
+  totalRpDelta: number;
+  avgRpDelta: number;
+  wins: number;
+  losses: number;
+  totalKills: number;
+  totalDamage: number;
+  avgKills: number;
+  avgDamage: number;
+};
+
+export async function getMapLegendAggregatesByAccount(
+  trackedAccountId: string,
+  hours = 168
+): Promise<TMapLegendAggregate[]> {
+  const result = await pool.query<TMapLegendAggregate>(
+    `select
+       coalesce(ranked_map_name_close, ranked_map_name_open) as "mapName",
+       legend_assumed as "legend",
+       count(*)::int as "games",
+       coalesce(sum(rp_delta), 0)::int as "totalRpDelta",
+       coalesce(round(avg(rp_delta)::numeric, 1), 0)::float as "avgRpDelta",
+       count(*) filter (where rp_delta > 0)::int as "wins",
+       count(*) filter (where rp_delta < 0)::int as "losses",
+       coalesce(sum(closing_career_kills - opening_career_kills) filter (
+         where opening_career_kills is not null and closing_career_kills is not null
+       ), 0)::int as "totalKills",
+       coalesce(sum(closing_career_damage - opening_career_damage) filter (
+         where opening_career_damage is not null and closing_career_damage is not null
+       ), 0)::int as "totalDamage",
+       coalesce(round(avg(closing_career_kills - opening_career_kills) filter (
+         where opening_career_kills is not null and closing_career_kills is not null
+       )), 0)::int as "avgKills",
+       coalesce(round(avg(closing_career_damage - opening_career_damage) filter (
+         where opening_career_damage is not null and closing_career_damage is not null
+       )), 0)::int as "avgDamage"
+     from inferred_game_segments
+     where tracked_account_id = $1
+       and ended_at is not null
+       and legend_assumed is not null
+       and coalesce(ranked_map_name_close, ranked_map_name_open) is not null
+       and (trigger_signals->>'reason') is distinct from 'legend_change'
+       and extract(epoch from (ended_at - started_at)) >= $3::double precision
+       and rp_delta is not null
+       and rp_delta <> 0
+       and started_at >= now() - ($2::int * interval '1 hour')
+     group by coalesce(ranked_map_name_close, ranked_map_name_open), legend_assumed
+     order by coalesce(ranked_map_name_close, ranked_map_name_open), sum(rp_delta) desc`,
+    [trackedAccountId, hours, SEGMENT_STATS_MIN_DURATION_SEC]
   );
   return result.rows;
 }

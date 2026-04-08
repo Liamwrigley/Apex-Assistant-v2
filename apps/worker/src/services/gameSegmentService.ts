@@ -16,6 +16,13 @@ const MERGE_RISK_THRESHOLD_SEC = Math.max(
 const DURATION_PLAUSIBLE_MIN_SEC = 90;
 const DURATION_PLAUSIBLE_MAX_SEC = 25 * 60;
 
+/** Compare legends case-insensitively and ignore outer whitespace to avoid spurious segment splits. */
+function normalizeLegendForCompare(legend: string | null): string | null {
+  if (legend == null) return null;
+  const t = legend.trim();
+  return t.length === 0 ? null : t.toLowerCase();
+}
+
 type TSyncInput = {
   trackedAccountId: string;
   nextPresenceStatus: TDerivedPresenceStatus;
@@ -24,6 +31,9 @@ type TSyncInput = {
   selectedLegend: string | null;
   rankName: string | null;
   rankDivision: string | null;
+  careerKills: number | null;
+  careerDamage: number | null;
+  careerWins: number | null;
 };
 
 function computeConfidence(params: {
@@ -58,7 +68,7 @@ function computeConfidence(params: {
  *  - Player went offline/out-of-game → close any open segment
  */
 export async function syncGameSegment(input: TSyncInput): Promise<void> {
-  const { trackedAccountId, nextPresenceStatus, nextActive, rankScore, selectedLegend, rankName, rankDivision } = input;
+  const { trackedAccountId, nextPresenceStatus, nextActive, rankScore, selectedLegend, rankName, rankDivision, careerKills, careerDamage, careerWins } = input;
   const isInGame = nextPresenceStatus === "in_game";
 
   const openSeg = await getOpenSegment(trackedAccountId);
@@ -93,7 +103,10 @@ export async function syncGameSegment(input: TSyncInput): Promise<void> {
         closingRankName: rankName,
         closingRankDivision: rankDivision,
         rankedMapCode: mapInfo?.mapCode ?? null,
-        rankedMapName: mapInfo?.mapName ?? null
+        rankedMapName: mapInfo?.mapName ?? null,
+        closingCareerKills: careerKills,
+        closingCareerDamage: careerDamage,
+        closingCareerWins: careerWins
       });
     }
     return;
@@ -111,15 +124,18 @@ export async function syncGameSegment(input: TSyncInput): Promise<void> {
       openingRankName: rankName,
       openingRankDivision: rankDivision,
       rankedMapCode: mapInfo?.mapCode ?? null,
-      rankedMapName: mapInfo?.mapName ?? null
+      rankedMapName: mapInfo?.mapName ?? null,
+      openingCareerKills: careerKills,
+      openingCareerDamage: careerDamage,
+      openingCareerWins: careerWins
     });
     return;
   }
 
+  const normSelected = normalizeLegendForCompare(selectedLegend);
+  const normOpen = normalizeLegendForCompare(openSeg.legendAssumed);
   const legendChanged =
-    selectedLegend !== null &&
-    openSeg.legendAssumed !== null &&
-    selectedLegend !== openSeg.legendAssumed;
+    normSelected !== null && normOpen !== null && normSelected !== normOpen;
 
   const rpChanged =
     openSeg.openingRankScore !== null && rankScore !== openSeg.openingRankScore;
@@ -152,7 +168,10 @@ export async function syncGameSegment(input: TSyncInput): Promise<void> {
       closingRankName: rankName,
       closingRankDivision: rankDivision,
       rankedMapCode: mapInfo?.mapCode ?? null,
-      rankedMapName: mapInfo?.mapName ?? null
+      rankedMapName: mapInfo?.mapName ?? null,
+      closingCareerKills: careerKills,
+      closingCareerDamage: careerDamage,
+      closingCareerWins: careerWins
     });
 
     const sessionId = await getOpenSessionId(trackedAccountId);
@@ -165,7 +184,10 @@ export async function syncGameSegment(input: TSyncInput): Promise<void> {
         openingRankName: rankName,
         openingRankDivision: rankDivision,
         rankedMapCode: mapInfo?.mapCode ?? null,
-        rankedMapName: mapInfo?.mapName ?? null
+        rankedMapName: mapInfo?.mapName ?? null,
+        openingCareerKills: careerKills,
+        openingCareerDamage: careerDamage,
+        openingCareerWins: careerWins
       });
     }
     return;
@@ -199,7 +221,10 @@ export async function syncGameSegment(input: TSyncInput): Promise<void> {
       closingRankName: rankName,
       closingRankDivision: rankDivision,
       rankedMapCode: mapInfo?.mapCode ?? null,
-      rankedMapName: mapInfo?.mapName ?? null
+      rankedMapName: mapInfo?.mapName ?? null,
+      closingCareerKills: careerKills,
+      closingCareerDamage: careerDamage,
+      closingCareerWins: careerWins
     });
 
     const sessionId = await getOpenSessionId(trackedAccountId);
@@ -212,7 +237,10 @@ export async function syncGameSegment(input: TSyncInput): Promise<void> {
         openingRankName: rankName,
         openingRankDivision: rankDivision,
         rankedMapCode: mapInfo?.mapCode ?? null,
-        rankedMapName: mapInfo?.mapName ?? null
+        rankedMapName: mapInfo?.mapName ?? null,
+        openingCareerKills: careerKills,
+        openingCareerDamage: careerDamage,
+        openingCareerWins: careerWins
       });
     }
   }

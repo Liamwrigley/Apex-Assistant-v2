@@ -15,12 +15,23 @@ import { formatRelativeTime } from "@/lib/format-relative-time";
 import { computeRankScoreDelta, RpDeltaBadge } from "@/components/rp-delta-badge";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
 import { SessionRankSnap, type TSessionRankSnap } from "@/components/session-rank-snap";
+import { SessionSegmentDetail, type TSegmentRow } from "@/components/session-segment-detail";
 
 export type TEstimatedGame = {
   legend: string | null;
   rpDelta: number | null;
   confidence: string;
   mergeRisk: boolean;
+  deltaKills?: number | null;
+  deltaDamage?: number | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  rankedMapNameOpen?: string | null;
+  rankedMapNameClose?: string | null;
+  openingCareerKills?: number | null;
+  closingCareerKills?: number | null;
+  openingCareerDamage?: number | null;
+  closingCareerDamage?: number | null;
 };
 
 export type TRecentSessionRow = {
@@ -54,42 +65,6 @@ function platformChipLabel(platform: string): string {
     return "XBOX";
   }
   return platform.toUpperCase();
-}
-
-const confidenceBg: Record<string, string> = {
-  high: "bg-green-500/20 text-green-300",
-  medium: "bg-yellow-500/20 text-yellow-300",
-  low: "bg-red-500/20 text-red-300",
-};
-
-function EstimatedGamesCell(props: { games?: TEstimatedGame[] }) {
-  const games = props.games ?? [];
-  if (games.length === 0) {
-    return <span className="text-muted-foreground text-xs">—</span>;
-  }
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-xs tabular-nums">{games.length} game{games.length !== 1 ? "s" : ""}</span>
-      <div className="flex flex-wrap gap-1">
-        {games.map((g, i) => (
-          <span
-            key={i}
-            className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[10px] ${confidenceBg[g.confidence] ?? "bg-muted/60"}`}
-            title={`${g.legend ?? "?"} | RP: ${g.rpDelta ?? "?"} | ${g.confidence}${g.mergeRisk ? " | merge risk" : ""}`}
-          >
-            <span className="max-w-[4rem] truncate">{g.legend ?? "?"}</span>
-            {g.rpDelta !== null ? (
-              <span className={g.rpDelta > 0 ? "text-green-400" : g.rpDelta < 0 ? "text-red-400" : "text-muted-foreground"}>
-                {g.rpDelta > 0 ? "+" : ""}{g.rpDelta}
-              </span>
-            ) : null}
-            {g.mergeRisk ? <span className="text-orange-400" title="Possible merged games">!</span> : null}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 function toSnap(
@@ -235,7 +210,22 @@ export function RecentSessionsSection(props: { rows: TRecentSessionRow[] }) {
                     )}
                   </td>
                   <td className="px-2 py-2 align-middle">
-                    <EstimatedGamesCell games={row.estimatedGames} />
+                    <SessionSegmentDetail
+                      segments={(row.estimatedGames ?? []).map((g) => ({
+                        legendAssumed: g.legend,
+                        rpDelta: g.rpDelta,
+                        confidence: g.confidence,
+                        mergeRisk: g.mergeRisk,
+                        startedAt: g.startedAt ?? "",
+                        endedAt: g.endedAt ?? null,
+                        rankedMapNameOpen: g.rankedMapNameOpen ?? null,
+                        rankedMapNameClose: g.rankedMapNameClose ?? null,
+                        openingCareerKills: g.openingCareerKills ?? null,
+                        closingCareerKills: g.closingCareerKills ?? null,
+                        openingCareerDamage: g.openingCareerDamage ?? null,
+                        closingCareerDamage: g.closingCareerDamage ?? null,
+                      }))}
+                    />
                   </td>
                   <td className="text-muted-foreground px-2 py-2 align-middle tabular-nums">
                     {formatDurationMs(durationMs)}

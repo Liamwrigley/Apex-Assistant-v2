@@ -1,7 +1,7 @@
 import { AutoRefresh } from "@/components/auto-refresh";
 import { LeaderboardCard } from "@/components/leaderboard-card";
 import { LivePresenceCard } from "@/components/live-presence-card";
-import { RecentSessionsSection } from "@/components/recent-sessions-section";
+import { RecentSessionsSection, type TRecentSessionRow } from "@/components/recent-sessions-section";
 import { TrackedAccountsOwnerTable } from "@/components/tracked-accounts-owner-table";
 import {
   Card,
@@ -18,6 +18,7 @@ import {
   getRecentCompletedSessions,
   getSegmentsBySession,
   listTrackedAccounts,
+  segmentCountsAsInferredRankedGame,
 } from "@apex-assistant/db";
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
 
@@ -115,22 +116,7 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       legends: string[];
     }
   >;
-  recentSessions: Array<{
-    sessionId: string;
-    ign: string;
-    platform: string;
-    startedAt: string;
-    endedAt: string;
-    openingRankScore: number | null;
-    latestRankScore: number | null;
-    openingRankName: string | null;
-    openingRankDivision: string | null;
-    openingRankIconUrl: string | null;
-    latestRankName: string | null;
-    latestRankDivision: string | null;
-    latestRankIconUrl: string | null;
-    legends: string[];
-  }>;
+  recentSessions: TRecentSessionRow[];
 }> {
   const [leaderboardRows, trackedAccounts, stats24h] = await Promise.all([
     getLeaderboardWithDelta24h(guildFilter),
@@ -256,12 +242,22 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     latestRankDivision: r.latestRankDivision,
     latestRankIconUrl: r.latestRankIconUrl,
     legends: r.legends,
-    estimatedGames: (segmentsBySession[r.sessionId] ?? []).map((seg) => ({
-      legend: seg.legendAssumed,
-      rpDelta: seg.rpDelta,
-      confidence: seg.confidence,
-      mergeRisk: seg.mergeRisk,
-    })),
+    estimatedGames: (segmentsBySession[r.sessionId] ?? [])
+      .filter(segmentCountsAsInferredRankedGame)
+      .map((seg) => ({
+        legend: seg.legendAssumed,
+        rpDelta: seg.rpDelta,
+        confidence: seg.confidence,
+        mergeRisk: seg.mergeRisk,
+        startedAt: seg.startedAt instanceof Date ? seg.startedAt.toISOString() : String(seg.startedAt),
+        endedAt: seg.endedAt ? (seg.endedAt instanceof Date ? seg.endedAt.toISOString() : String(seg.endedAt)) : null,
+        rankedMapNameOpen: seg.rankedMapNameOpen,
+        rankedMapNameClose: seg.rankedMapNameClose,
+        openingCareerKills: seg.openingCareerKills,
+        closingCareerKills: seg.closingCareerKills,
+        openingCareerDamage: seg.openingCareerDamage,
+        closingCareerDamage: seg.closingCareerDamage,
+      })),
   }));
 
   pageLog("dashboard db load", {

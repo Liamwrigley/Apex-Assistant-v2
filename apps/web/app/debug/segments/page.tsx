@@ -6,6 +6,7 @@ import {
 } from "@apex-assistant/db";
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SegmentTriggerCell } from "./segment-trigger-cell";
 
 export const dynamic = "force-dynamic";
 
@@ -122,7 +123,7 @@ export default async function DebugSegmentsPage() {
                 {segments.length === 0 ? (
                   <p className="text-muted-foreground text-xs">No segments yet.</p>
                 ) : (
-                  <table className="w-full min-w-[1200px] text-left text-xs">
+                  <table className="w-full min-w-[1400px] text-left text-xs">
                     <thead>
                       <tr className="text-muted-foreground border-b">
                         <th className="px-2 py-1 font-medium">Status</th>
@@ -137,6 +138,9 @@ export default async function DebugSegmentsPage() {
                         <th className="px-2 py-1 font-medium">Close Tier</th>
                         <th className="px-2 py-1 font-medium">Map (Open)</th>
                         <th className="px-2 py-1 font-medium">Map (Close)</th>
+                        <th className="px-2 py-1 font-medium">Kills</th>
+                        <th className="px-2 py-1 font-medium">Dmg</th>
+                        <th className="px-2 py-1 font-medium">Wins</th>
                         <th className="px-2 py-1 font-medium">Confidence</th>
                         <th className="px-2 py-1 font-medium">Merge Risk</th>
                         <th className="px-2 py-1 font-medium">Trigger</th>
@@ -182,6 +186,21 @@ export default async function DebugSegmentsPage() {
                             <td className="px-2 py-1 whitespace-nowrap">
                               {seg.rankedMapNameClose ?? "-"}
                             </td>
+                            <td className="px-2 py-1 tabular-nums">
+                              {seg.openingCareerKills != null && seg.closingCareerKills != null
+                                ? seg.closingCareerKills - seg.openingCareerKills
+                                : "-"}
+                            </td>
+                            <td className="px-2 py-1 tabular-nums">
+                              {seg.openingCareerDamage != null && seg.closingCareerDamage != null
+                                ? (seg.closingCareerDamage - seg.openingCareerDamage).toLocaleString()
+                                : "-"}
+                            </td>
+                            <td className="px-2 py-1 tabular-nums">
+                              {seg.openingCareerWins != null && seg.closingCareerWins != null
+                                ? seg.closingCareerWins - seg.openingCareerWins
+                                : "-"}
+                            </td>
                             <td className="px-2 py-1">
                               <span className={`rounded px-1.5 py-0.5 ${confidenceColor[seg.confidence] ?? ""}`}>
                                 {seg.confidence}
@@ -192,10 +211,8 @@ export default async function DebugSegmentsPage() {
                                 <span className="rounded bg-orange-900/40 px-1.5 py-0.5 text-orange-300">yes</span>
                               ) : "-"}
                             </td>
-                            <td className="px-2 py-1">
-                              <code className="text-muted-foreground max-w-[300px] truncate block text-[10px]">
-                                {JSON.stringify(seg.triggerSignals)}
-                              </code>
+                            <td className="px-2 py-1 align-top">
+                              <SegmentTriggerCell segmentId={seg.id} triggerSignals={seg.triggerSignals} />
                             </td>
                           </tr>
                         );

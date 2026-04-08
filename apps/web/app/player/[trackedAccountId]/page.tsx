@@ -8,8 +8,21 @@ import {
   getSegmentsBySession,
   getLegendAggregatesByAccount,
   getMapAggregatesByAccount,
+  getMapLegendAggregatesByAccount,
   getCareerStatDeltasForTrackedAccount,
+  segmentCountsAsInferredRankedGame,
 } from "@apex-assistant/db";
+import {
+  PlayerProfileRangeProvider,
+  PlayerProfileRangePicker,
+  type TProfileRangePayload,
+} from "./profile-range-context";
+import {
+  PlayerProfileHeroImage,
+  PlayerProfileLatestRpInline,
+  PlayerProfileRangeStatsCareer,
+  PlayerProfileRangeTimelineTables,
+} from "./profile-range-panels";
 import {
   Card,
   CardContent,
@@ -17,7 +30,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { PlayerTimelineSparkline } from "@/components/player-timeline-sparkline";
 import { computeRankScoreDelta, RpDeltaBadge } from "@/components/rp-delta-badge";
 import { SessionRankSnap, type TSessionRankSnap } from "@/components/session-rank-snap";
 import { formatDurationMs } from "@/lib/format-duration";
@@ -29,7 +41,7 @@ import {
   type TPresenceEvaluation,
 } from "@/lib/realtime-presence";
 import { AutoRefresh } from "@/components/auto-refresh";
-import { PlayerProfileTimePicker } from "./time-picker";
+import { SessionSegmentDetail, type TSegmentRow } from "@/components/session-segment-detail";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -64,12 +76,6 @@ function platformLabel(platform: string): string {
   if (v === "xbl" || v === "x1") return "XBOX";
   return platform.toUpperCase();
 }
-
-const confidenceBg: Record<string, string> = {
-  high: "bg-green-500/20 text-green-300",
-  medium: "bg-yellow-500/20 text-yellow-300",
-  low: "bg-red-500/20 text-red-300",
-};
 
 function isOfflineLikeStateLabel(text: string | null | undefined): boolean {
   if (!text?.trim()) return false;
@@ -127,8 +133,9 @@ export default async function PlayerProfilePage(props: {
     notFound();
   }
 
-  const rangeKey = searchParams.range ?? "7d";
-  const hours = HOUR_OPTIONS[rangeKey] ?? 168;
+  const rawRange = searchParams.range ?? "7d";
+  const rangeKey = rawRange in HOUR_OPTIONS ? rawRange : "7d";
+  const hours = HOUR_OPTIONS[rangeKey];
 
   const [
     timelineRaw,
@@ -136,6 +143,7 @@ export default async function PlayerProfilePage(props: {
     openSessionSummaries,
     legendAggregates,
     mapAggregates,
+    mapLegendAggregates,
     careerDeltas,
   ] = await Promise.all([
     getRankTimelineByTrackedAccountId(trackedAccountId, hours),
@@ -143,6 +151,7 @@ export default async function PlayerProfilePage(props: {
     getOpenSessionSummariesForTrackedAccountIds([trackedAccountId]),
     getLegendAggregatesByAccount(trackedAccountId, hours),
     getMapAggregatesByAccount(trackedAccountId, hours),
+    getMapLegendAggregatesByAccount(trackedAccountId, hours),
     getCareerStatDeltasForTrackedAccount(trackedAccountId, hours),
   ]);
 
@@ -150,6 +159,15 @@ export default async function PlayerProfilePage(props: {
     capturedAt: toIso(p.capturedAt),
     rankScore: p.rankScore,
   }));
+
+  const initialRangePayload: TProfileRangePayload = {
+    rangeKey,
+    timelinePoints,
+    legendAggregates,
+    mapAggregates,
+    mapLegendAggregates,
+    careerDeltas,
+  };
 
   const openSession = openSessionSummaries[0] ?? null;
 
@@ -161,26 +179,9 @@ export default async function PlayerProfilePage(props: {
     })
   );
 
-  const latestScore = timelinePoints.length > 0
-    ? timelinePoints[timelinePoints.length - 1].rankScore
+  const lastSeenLegendUrl = account.realtimeSelectedLegend
+    ? getLegendIconUrl(account.realtimeSelectedLegend)
     : null;
-
-  const mostPlayedLegend = legendAggregates.length > 0 ? legendAggregates[0] : null;
-  const mostPlayedLegendIconUrl = mostPlayedLegend
-    ? getLegendIconUrl(mostPlayedLegend.legend)
-    : null;
-
-  const bestLegend =
-    legendAggregates.length > 0
-      ? [...legendAggregates].sort((a, b) => {
-          if (b.avgRpDelta !== a.avgRpDelta) return b.avgRpDelta - a.avgRpDelta;
-          return b.games - a.games;
-        })[0]
-      : null;
-  const bestLegendIconUrl = bestLegend ? getLegendIconUrl(bestLegend.legend) : null;
-
-  const totalGames = legendAggregates.reduce((s, r) => s + r.games, 0);
-  const totalRpDelta = legendAggregates.reduce((s, r) => s + r.totalRpDelta, 0);
 
   const nowMs = Date.now();
   const evaluation = evaluateRealtimePresence({
@@ -192,17 +193,6 @@ export default async function PlayerProfilePage(props: {
   });
   const isOnline = evaluation.shouldShow;
   const isInGame = evaluation.status === "in_game";
-
-  // Hero image priority: current legend (if online) > most played > last-seen legend > rank icon
-  const lastSeenLegendUrl = account.realtimeSelectedLegend
-    ? getLegendIconUrl(account.realtimeSelectedLegend)
-    : null;
-  const heroIconUrl = (() => {
-    if (isOnline && lastSeenLegendUrl) return lastSeenLegendUrl;
-    if (mostPlayedLegendIconUrl) return mostPlayedLegendIconUrl;
-    if (lastSeenLegendUrl) return lastSeenLegendUrl;
-    return account.currentRankIconUrl;
-  })();
 
   const sessionRpDelta = openSession
     ? computeRankScoreDelta(openSession.openingRankScore, openSession.latestRankScore)
@@ -225,6 +215,10 @@ export default async function PlayerProfilePage(props: {
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <AutoRefresh intervalMs={60_000} />
 
+      <PlayerProfileRangeProvider
+        trackedAccountId={trackedAccountId}
+        initial={initialRangePayload}
+      >
       {/* Breadcrumb + range picker */}
       <div className="flex items-center justify-between gap-4">
         <nav className="text-muted-foreground text-sm">
@@ -238,7 +232,7 @@ export default async function PlayerProfilePage(props: {
               ? `Synced ${formatRelativeTime(toIso(account.lastCheckedAt))}`
               : "Never synced"}
           </span>
-          <PlayerProfileTimePicker current={rangeKey} />
+          <PlayerProfileRangePicker />
         </div>
       </div>
 
@@ -246,15 +240,12 @@ export default async function PlayerProfilePage(props: {
       <div className="grid gap-6 md:grid-cols-[280px_1fr] md:items-stretch">
         {/* Left: visual hero card mirroring live presence */}
         <div className="relative isolate flex min-h-[400px] flex-col overflow-hidden rounded-lg border md:h-full md:min-h-0">
-          {heroIconUrl ? (
-            <img
-              src={heroIconUrl}
-              alt={account.realtimeSelectedLegend ?? mostPlayedLegend?.legend ?? account.ign}
-              className="absolute inset-0 h-full w-full object-cover object-top"
-            />
-          ) : (
-            <div className="absolute inset-0 bg-muted" aria-hidden />
-          )}
+          <PlayerProfileHeroImage
+            isOnline={isOnline}
+            lastSeenLegendUrl={lastSeenLegendUrl}
+            currentRankIconUrl={account.currentRankIconUrl}
+            alt={account.realtimeSelectedLegend ?? account.ign}
+          />
 
           <div
             className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/15 via-black/25 to-black/65"
@@ -286,11 +277,7 @@ export default async function PlayerProfilePage(props: {
                       {account.currentRankName}
                       {account.currentRankDivision ? ` ${account.currentRankDivision}` : ""}
                     </span>
-                    {latestScore !== null ? (
-                      <span className="text-muted-foreground text-[11px] tabular-nums">
-                        · {latestScore.toLocaleString()} RP
-                      </span>
-                    ) : null}
+                    <PlayerProfileLatestRpInline />
                   </div>
                 ) : null}
 
@@ -342,129 +329,13 @@ export default async function PlayerProfilePage(props: {
 
         {/* Right: stats summary + current session / offline — fills grid row height */}
         <div className="flex min-h-[400px] flex-col gap-4 md:h-full md:min-h-0">
-          {/* Overall stats row */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Card className="border-emerald-500/20 bg-emerald-500/5">
-              <CardHeader className="space-y-1 p-2.5">
-                <CardDescription className="text-[11px] leading-none">Games ({rangeKey})</CardDescription>
-                <CardTitle className="text-lg font-semibold tabular-nums leading-tight">
-                  {totalGames}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card className="border-cyan-500/20 bg-cyan-500/5">
-              <CardHeader className="space-y-1 p-2.5">
-                <CardDescription className="text-[11px] leading-none">Net RP ({rangeKey})</CardDescription>
-                <CardTitle className="text-lg font-semibold leading-tight">
-                  <RpDeltaBadge delta={totalGames > 0 ? totalRpDelta : null} />
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card className="border-violet-500/20 bg-violet-500/5">
-              <CardHeader className="space-y-1 p-2.5">
-                <CardDescription className="text-[11px] leading-none">Best legend ({rangeKey})</CardDescription>
-                <CardTitle className="flex flex-col items-start gap-0.5 text-lg font-semibold leading-tight">
-                  {bestLegend ? (
-                    <>
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        {bestLegendIconUrl ? (
-                          <img src={bestLegendIconUrl} alt="" className="h-5 w-5 shrink-0 rounded-sm object-cover" />
-                        ) : null}
-                        <span className="truncate">{bestLegend.legend}</span>
-                      </span>
-                      <span className="text-muted-foreground text-xs font-normal tabular-nums">
-                        Avg <RpDeltaBadge delta={bestLegend.avgRpDelta} /> · {bestLegend.games} game
-                        {bestLegend.games !== 1 ? "s" : ""}
-                      </span>
-                    </>
-                  ) : (
-                    "—"
-                  )}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card className="border-amber-500/20 bg-amber-500/5">
-              <CardHeader className="space-y-1 p-2.5">
-                <CardDescription className="text-[11px] leading-none">Most played ({rangeKey})</CardDescription>
-                <CardTitle className="flex flex-col items-start gap-0.5 text-lg font-semibold leading-tight">
-                  {mostPlayedLegend ? (
-                    <>
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        {mostPlayedLegendIconUrl ? (
-                          <img
-                            src={mostPlayedLegendIconUrl}
-                            alt=""
-                            className="h-5 w-5 shrink-0 rounded-sm object-cover"
-                          />
-                        ) : null}
-                        <span className="truncate">{mostPlayedLegend.legend}</span>
-                      </span>
-                      <span className="text-muted-foreground text-xs font-normal tabular-nums">
-                        {mostPlayedLegend.games} game{mostPlayedLegend.games !== 1 ? "s" : ""}
-                      </span>
-                    </>
-                  ) : (
-                    "—"
-                  )}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-          </div>
-
-          {/* Career — neutral shell so delta badges (green/red) read clearly */}
-          {(account.careerKills !== null || account.careerDamage !== null || account.careerWins !== null) ? (
-            <Card className="border-border/80 bg-muted/25">
-              <CardContent className="p-0 px-4 py-3.5 sm:px-5">
-              <div className="mb-3 flex items-center gap-3">
-                <span
-                  className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent"
-                  aria-hidden
-                />
-                <span className="text-muted-foreground flex shrink-0 flex-col items-center gap-0.5 text-center">
-                  <span className="text-[10px] font-medium uppercase tracking-[0.18em]">
-                    Career
-                  </span>
-                  <span className="text-[10px] font-normal normal-case tracking-normal text-muted-foreground/90">
-                    Δ vs {rangeKey}
-                  </span>
-                </span>
-                <span
-                  className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent"
-                  aria-hidden
-                />
-              </div>
-              <div className="grid grid-cols-3 divide-x divide-border/60">
-                <div className="min-w-0 pr-4 sm:pr-8">
-                  <p className="text-muted-foreground text-[11px] tracking-wide">Kills</p>
-                  <p className="mt-0.5 truncate text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">
-                    {account.careerKills?.toLocaleString() ?? "—"}
-                  </p>
-                  <div className="mt-1.5">
-                    <RpDeltaBadge delta={careerDeltas.deltaKills} />
-                  </div>
-                </div>
-                <div className="min-w-0 px-4 sm:px-8">
-                  <p className="text-muted-foreground text-[11px] tracking-wide">Damage</p>
-                  <p className="mt-0.5 truncate text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">
-                    {account.careerDamage?.toLocaleString() ?? "—"}
-                  </p>
-                  <div className="mt-1.5">
-                    <RpDeltaBadge delta={careerDeltas.deltaDamage} />
-                  </div>
-                </div>
-                <div className="min-w-0 pl-4 sm:pl-8">
-                  <p className="text-muted-foreground text-[11px] tracking-wide">Wins</p>
-                  <p className="mt-0.5 truncate text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">
-                    {account.careerWins?.toLocaleString() ?? "—"}
-                  </p>
-                  <div className="mt-1.5">
-                    <RpDeltaBadge delta={careerDeltas.deltaWins} />
-                  </div>
-                </div>
-              </div>
-              </CardContent>
-            </Card>
-          ) : null}
+          <PlayerProfileRangeStatsCareer
+            account={{
+              careerKills: account.careerKills,
+              careerDamage: account.careerDamage,
+              careerWins: account.careerWins,
+            }}
+          />
 
           {/* Current session (live) vs offline */}
           {openSession || !isOnline ? (
@@ -566,122 +437,7 @@ export default async function PlayerProfilePage(props: {
         </div>
       </div>
 
-      {/* RP Timeline Sparkline */}
-      <Card>
-        <CardHeader>
-          <CardTitle>RP Timeline</CardTitle>
-          <CardDescription>Rank score over the selected time range.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {timelinePoints.length >= 2 ? (
-            <PlayerTimelineSparkline
-              trackedAccountId={trackedAccountId}
-              points={timelinePoints}
-              variant="profile"
-            />
-          ) : (
-            <p className="text-muted-foreground text-sm">Not enough data for a timeline.</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Legend Breakdown */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Legend Performance</CardTitle>
-          <CardDescription>
-            Aggregated RP per legend ({rangeKey}).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {legendAggregates.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No completed segments with legend data yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="text-muted-foreground border-b text-xs">
-                    <th className="px-2 py-2 font-medium">Legend</th>
-                    <th className="px-2 py-2 font-medium text-right">Games</th>
-                    <th className="px-2 py-2 font-medium text-right">Total RP</th>
-                    <th className="px-2 py-2 font-medium text-right">Avg RP</th>
-                    <th className="px-2 py-2 font-medium text-right">W / L</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {legendAggregates.map((row) => {
-                    const iconUrl = getLegendIconUrl(row.legend);
-                    return (
-                      <tr key={row.legend} className="border-border/60 border-b last:border-0">
-                        <td className="px-2 py-2">
-                          <div className="flex items-center gap-2">
-                            {iconUrl ? (
-                              <img src={iconUrl} alt="" className="h-5 w-5 rounded-sm object-cover" />
-                            ) : null}
-                            <span className="font-medium">{row.legend}</span>
-                          </div>
-                        </td>
-                        <td className="px-2 py-2 text-right tabular-nums">{row.games}</td>
-                        <td className="px-2 py-2 text-right">
-                          <RpDeltaBadge delta={row.totalRpDelta} />
-                        </td>
-                        <td className="px-2 py-2 text-right">
-                          <RpDeltaBadge delta={row.avgRpDelta} />
-                        </td>
-                        <td className="text-muted-foreground px-2 py-2 text-right tabular-nums">
-                          {row.wins} / {row.losses}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Map Breakdown */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Map Performance</CardTitle>
-          <CardDescription>
-            RP breakdown by ranked map ({rangeKey}).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {mapAggregates.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No map data yet (populates as new games are tracked).</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="text-muted-foreground border-b text-xs">
-                    <th className="px-2 py-2 font-medium">Map</th>
-                    <th className="px-2 py-2 font-medium text-right">Games</th>
-                    <th className="px-2 py-2 font-medium text-right">Total RP</th>
-                    <th className="px-2 py-2 font-medium text-right">Avg RP</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mapAggregates.map((row) => (
-                    <tr key={row.mapName} className="border-border/60 border-b last:border-0">
-                      <td className="px-2 py-2 font-medium">{row.mapName}</td>
-                      <td className="px-2 py-2 text-right tabular-nums">{row.games}</td>
-                      <td className="px-2 py-2 text-right">
-                        <RpDeltaBadge delta={row.totalRpDelta} />
-                      </td>
-                      <td className="px-2 py-2 text-right">
-                        <RpDeltaBadge delta={row.avgRpDelta} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <PlayerProfileRangeTimelineTables trackedAccountId={trackedAccountId} />
 
       {/* Recent Completed Sessions */}
       <Card>
@@ -728,7 +484,22 @@ export default async function PlayerProfilePage(props: {
                     row.latestRankDivision,
                     row.latestRankIconUrl
                   );
-                  const segments = segmentsBySession[row.sessionId] ?? [];
+                  const segments: TSegmentRow[] = (segmentsBySession[row.sessionId] ?? [])
+                    .filter(segmentCountsAsInferredRankedGame)
+                    .map((s) => ({
+                      legendAssumed: s.legendAssumed,
+                      rpDelta: s.rpDelta,
+                      confidence: s.confidence,
+                      mergeRisk: s.mergeRisk,
+                      startedAt: toIso(s.startedAt),
+                      endedAt: s.endedAt ? toIso(s.endedAt) : null,
+                      rankedMapNameOpen: s.rankedMapNameOpen,
+                      rankedMapNameClose: s.rankedMapNameClose,
+                      openingCareerKills: s.openingCareerKills,
+                      closingCareerKills: s.closingCareerKills,
+                      openingCareerDamage: s.openingCareerDamage,
+                      closingCareerDamage: s.closingCareerDamage,
+                    }));
                   return (
                     <tr key={row.sessionId} className="border-border/60 border-b last:border-0">
                       <td className="px-2 py-2 align-top">
@@ -770,32 +541,7 @@ export default async function PlayerProfilePage(props: {
                         )}
                       </td>
                       <td className="px-2 py-2 align-middle">
-                        {segments.length === 0 ? (
-                          <span className="text-muted-foreground text-xs">—</span>
-                        ) : (
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs tabular-nums">
-                              {segments.length} game{segments.length !== 1 ? "s" : ""}
-                            </span>
-                            <div className="flex flex-wrap gap-1">
-                              {segments.map((g, i) => (
-                                <span
-                                  key={i}
-                                  className={`inline-flex items-center gap-1 rounded px-1 py-0.5 text-[10px] ${confidenceBg[g.confidence] ?? "bg-muted/60"}`}
-                                  title={`${g.legendAssumed ?? "?"} | RP: ${g.rpDelta ?? "?"} | ${g.confidence}${g.mergeRisk ? " | merge risk" : ""}`}
-                                >
-                                  <span className="max-w-[4rem] truncate">{g.legendAssumed ?? "?"}</span>
-                                  {g.rpDelta !== null ? (
-                                    <span className={g.rpDelta > 0 ? "text-green-400" : g.rpDelta < 0 ? "text-red-400" : "text-muted-foreground"}>
-                                      {g.rpDelta > 0 ? "+" : ""}{g.rpDelta}
-                                    </span>
-                                  ) : null}
-                                  {g.mergeRisk ? <span className="text-orange-400" title="Possible merged games">!</span> : null}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                        <SessionSegmentDetail segments={segments} />
                       </td>
                       <td className="text-muted-foreground px-2 py-2 align-middle tabular-nums">
                         {formatDurationMs(durationMs)}
@@ -811,6 +557,7 @@ export default async function PlayerProfilePage(props: {
           )}
         </CardContent>
       </Card>
+      </PlayerProfileRangeProvider>
     </main>
   );
 }

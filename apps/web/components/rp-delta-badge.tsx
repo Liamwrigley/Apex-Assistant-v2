@@ -16,6 +16,8 @@ export function RpDeltaBadge(props: {
   delta: number | null | undefined;
   /** When delta is not a finite number */
   empty?: "dash" | "hidden";
+  /** Fixed decimal places for display (e.g. 1 for avg RP). Omit for integers. */
+  decimals?: number;
   className?: string;
 }) {
   const empty = props.empty ?? "dash";
@@ -52,7 +54,7 @@ export function RpDeltaBadge(props: {
       ) : null}
       <span>
         {d > 0 ? "+" : ""}
-        {d.toLocaleString()}
+        {props.decimals != null ? d.toFixed(props.decimals) : d.toLocaleString()}
       </span>
     </span>
   );
