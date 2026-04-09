@@ -64,7 +64,7 @@ export function SessionSegmentDetail(props: { segments: TSegmentRow[] }) {
                   seg.endedAt
                     ? new Date(seg.endedAt).getTime() - new Date(seg.startedAt).getTime()
                     : null;
-                const mapName = seg.rankedMapNameClose ?? seg.rankedMapNameOpen;
+                const mapName = seg.rankedMapNameOpen ?? seg.rankedMapNameClose;
                 return (
                   <tr key={i} className="border-b border-border/30 last:border-0">
                     <td className="px-2.5 py-1.5">

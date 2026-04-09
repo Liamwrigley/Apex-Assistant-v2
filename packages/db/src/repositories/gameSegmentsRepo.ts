@@ -292,20 +292,20 @@ export async function getMapAggregatesByAccount(
 ): Promise<TMapAggregate[]> {
   const result = await pool.query<TMapAggregate>(
     `select
-       coalesce(ranked_map_name_close, ranked_map_name_open) as "mapName",
+       coalesce(ranked_map_name_open, ranked_map_name_close) as "mapName",
        count(*)::int as "games",
        coalesce(sum(rp_delta), 0)::int as "totalRpDelta",
        coalesce(round(avg(rp_delta)::numeric, 1), 0)::float as "avgRpDelta"
      from inferred_game_segments
      where tracked_account_id = $1
        and ended_at is not null
-       and coalesce(ranked_map_name_close, ranked_map_name_open) is not null
+       and coalesce(ranked_map_name_open, ranked_map_name_close) is not null
        and (trigger_signals->>'reason') is distinct from 'legend_change'
        and extract(epoch from (ended_at - started_at)) >= $3::double precision
        and rp_delta is not null
        and rp_delta <> 0
        and started_at >= now() - ($2::int * interval '1 hour')
-     group by coalesce(ranked_map_name_close, ranked_map_name_open)
+     group by coalesce(ranked_map_name_open, ranked_map_name_close)
      order by count(*) desc`,
     [trackedAccountId, hours, SEGMENT_STATS_MIN_DURATION_SEC]
   );
@@ -332,7 +332,7 @@ export async function getMapLegendAggregatesByAccount(
 ): Promise<TMapLegendAggregate[]> {
   const result = await pool.query<TMapLegendAggregate>(
     `select
-       coalesce(ranked_map_name_close, ranked_map_name_open) as "mapName",
+       coalesce(ranked_map_name_open, ranked_map_name_close) as "mapName",
        legend_assumed as "legend",
        count(*)::int as "games",
        coalesce(sum(rp_delta), 0)::int as "totalRpDelta",
@@ -355,14 +355,14 @@ export async function getMapLegendAggregatesByAccount(
      where tracked_account_id = $1
        and ended_at is not null
        and legend_assumed is not null
-       and coalesce(ranked_map_name_close, ranked_map_name_open) is not null
+       and coalesce(ranked_map_name_open, ranked_map_name_close) is not null
        and (trigger_signals->>'reason') is distinct from 'legend_change'
        and extract(epoch from (ended_at - started_at)) >= $3::double precision
        and rp_delta is not null
        and rp_delta <> 0
        and started_at >= now() - ($2::int * interval '1 hour')
-     group by coalesce(ranked_map_name_close, ranked_map_name_open), legend_assumed
-     order by coalesce(ranked_map_name_close, ranked_map_name_open), sum(rp_delta) desc`,
+     group by coalesce(ranked_map_name_open, ranked_map_name_close), legend_assumed
+     order by coalesce(ranked_map_name_open, ranked_map_name_close), sum(rp_delta) desc`,
     [trackedAccountId, hours, SEGMENT_STATS_MIN_DURATION_SEC]
   );
   return result.rows;
