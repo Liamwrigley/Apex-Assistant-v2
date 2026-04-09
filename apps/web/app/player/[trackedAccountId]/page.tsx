@@ -10,7 +10,6 @@ import {
   getMapAggregatesByAccount,
   getMapLegendAggregatesByAccount,
   getCareerStatDeltasForTrackedAccount,
-  segmentCountsAsInferredRankedGame,
 } from "@apex-assistant/db";
 import {
   PlayerProfileRangeProvider,
@@ -41,7 +40,12 @@ import {
   type TPresenceEvaluation,
 } from "@/lib/realtime-presence";
 import { AutoRefresh } from "@/components/auto-refresh";
-import { SessionSegmentDetail, type TSegmentRow } from "@/components/session-segment-detail";
+import { RecentSessionsSection } from "@/components/recent-sessions-section";
+import {
+  buildGranularSnapshotsByAccount,
+  mapOpenSessionsToRecentSessionRows,
+  mapSessionsToRecentSessionRows,
+} from "@/lib/recent-session-rows";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -171,13 +175,34 @@ export default async function PlayerProfilePage(props: {
 
   const openSession = openSessionSummaries[0] ?? null;
 
-  const sessionIds = recentSessions.map((r) => r.sessionId);
+  const sessionIds = [
+    ...new Set([
+      ...recentSessions.map((r) => r.sessionId),
+      ...openSessionSummaries.map((o) => o.sessionId),
+    ]),
+  ];
   const segmentsBySession: Record<string, Awaited<ReturnType<typeof getSegmentsBySession>>> = {};
   await Promise.all(
     sessionIds.map(async (sid) => {
       segmentsBySession[sid] = await getSegmentsBySession(sid);
     })
   );
+
+  const granularSnapshotsByAccount = await buildGranularSnapshotsByAccount(recentSessions);
+  const completedSessionRows = mapSessionsToRecentSessionRows(
+    recentSessions,
+    segmentsBySession,
+    granularSnapshotsByAccount
+  );
+  const accountByTrackedId = new Map([
+    [trackedAccountId, { ign: account.ign, platform: account.platform }],
+  ]);
+  const activeSessionRows = await mapOpenSessionsToRecentSessionRows(
+    openSessionSummaries,
+    accountByTrackedId,
+    segmentsBySession
+  );
+  const recentSessionRows = [...activeSessionRows, ...completedSessionRows];
 
   const lastSeenLegendUrl = account.realtimeSelectedLegend
     ? getLegendIconUrl(account.realtimeSelectedLegend)
@@ -439,124 +464,14 @@ export default async function PlayerProfilePage(props: {
 
       <PlayerProfileRangeTimelineTables trackedAccountId={trackedAccountId} />
 
-      {/* Recent Completed Sessions */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Sessions</CardTitle>
-          <CardDescription>
-            Completed play sessions with rank changes, legends, and estimated games.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          {recentSessions.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No completed sessions yet.</p>
-          ) : (
-            <table className="w-full min-w-[700px] text-left text-sm">
-              <thead>
-                <tr className="text-muted-foreground border-b text-xs">
-                  <th className="px-2 py-2 font-medium">Start</th>
-                  <th className="px-2 py-2 font-medium">End</th>
-                  <th className="px-2 py-2 font-medium">RP Δ</th>
-                  <th className="px-2 py-2 font-medium">Legends</th>
-                  <th className="px-2 py-2 font-medium">Est. Games</th>
-                  <th className="px-2 py-2 font-medium">Duration</th>
-                  <th className="px-2 py-2 text-right font-medium">Finished</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentSessions.map((row) => {
-                  const durationMs =
-                    new Date(row.endedAt).getTime() -
-                    new Date(row.startedAt).getTime();
-                  const rpDelta = computeRankScoreDelta(
-                    row.openingRankScore,
-                    row.latestRankScore
-                  );
-                  const startSnap = toSnap(
-                    row.openingRankScore,
-                    row.openingRankName,
-                    row.openingRankDivision,
-                    row.openingRankIconUrl
-                  );
-                  const endSnap = toSnap(
-                    row.latestRankScore,
-                    row.latestRankName,
-                    row.latestRankDivision,
-                    row.latestRankIconUrl
-                  );
-                  const segments: TSegmentRow[] = (segmentsBySession[row.sessionId] ?? [])
-                    .filter(segmentCountsAsInferredRankedGame)
-                    .map((s) => ({
-                      legendAssumed: s.legendAssumed,
-                      rpDelta: s.rpDelta,
-                      confidence: s.confidence,
-                      mergeRisk: s.mergeRisk,
-                      startedAt: toIso(s.startedAt),
-                      endedAt: s.endedAt ? toIso(s.endedAt) : null,
-                      rankedMapNameOpen: s.rankedMapNameOpen,
-                      rankedMapNameClose: s.rankedMapNameClose,
-                      openingCareerKills: s.openingCareerKills,
-                      closingCareerKills: s.closingCareerKills,
-                      openingCareerDamage: s.openingCareerDamage,
-                      closingCareerDamage: s.closingCareerDamage,
-                    }));
-                  return (
-                    <tr key={row.sessionId} className="border-border/60 border-b last:border-0">
-                      <td className="px-2 py-2 align-top">
-                        <SessionRankSnap snap={startSnap} compact />
-                      </td>
-                      <td className="px-2 py-2 align-top">
-                        <SessionRankSnap snap={endSnap} compact />
-                      </td>
-                      <td className="px-2 py-2 align-middle">
-                        <RpDeltaBadge delta={rpDelta} />
-                      </td>
-                      <td className="px-2 py-2 align-middle">
-                        {row.legends.length === 0 ? (
-                          <span className="text-muted-foreground">—</span>
-                        ) : (
-                          <div className="flex flex-wrap items-center gap-1">
-                            {row.legends.map((name) => {
-                              const iconUrl = getLegendIconUrl(name);
-                              return (
-                                <span
-                                  key={name}
-                                  className="bg-muted/60 inline-flex items-center gap-1 rounded px-1 py-0.5"
-                                  title={name}
-                                >
-                                  {iconUrl ? (
-                                    <img
-                                      src={iconUrl}
-                                      alt=""
-                                      className="h-3.5 w-3.5 rounded-sm object-cover"
-                                    />
-                                  ) : null}
-                                  <span className="max-w-[5rem] truncate text-[10px]">
-                                    {name}
-                                  </span>
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-2 py-2 align-middle">
-                        <SessionSegmentDetail segments={segments} />
-                      </td>
-                      <td className="text-muted-foreground px-2 py-2 align-middle tabular-nums">
-                        {formatDurationMs(durationMs)}
-                      </td>
-                      <td className="text-muted-foreground px-2 py-2 text-right align-middle text-xs">
-                        {formatRelativeTime(toIso(row.endedAt))}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </CardContent>
-      </Card>
+      <RecentSessionsSection
+        rows={recentSessionRows}
+        showAllSessions
+        hidePlayerColumn
+        emptyCardContent={
+          <p className="text-muted-foreground text-sm">No completed sessions yet.</p>
+        }
+      />
       </PlayerProfileRangeProvider>
     </main>
   );

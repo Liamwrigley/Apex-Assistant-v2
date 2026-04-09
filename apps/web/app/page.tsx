@@ -18,9 +18,13 @@ import {
   getRecentCompletedSessions,
   getSegmentsBySession,
   listTrackedAccounts,
-  segmentCountsAsInferredRankedGame,
 } from "@apex-assistant/db";
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
+import {
+  buildGranularSnapshotsByAccount,
+  mapOpenSessionsToRecentSessionRows,
+  mapSessionsToRecentSessionRows,
+} from "@/lib/recent-session-rows";
 
 export const dynamic = "force-dynamic";
 const debugLogs = (process.env.DEBUG_LOGS ?? "false").toLowerCase() === "true";
@@ -138,20 +142,6 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     }));
 
   const trackedIds = leaderboard.map((r) => r.trackedAccountId);
-  const timelinesRaw = await getRankTimelinesByTrackedAccountIds(
-    trackedIds,
-    168,
-  );
-  const timelines: Record<
-    string,
-    Array<{ capturedAt: string; rankScore: number }>
-  > = {};
-  for (const [tid, pts] of Object.entries(timelinesRaw)) {
-    timelines[tid] = pts.map((p) => ({
-      capturedAt: toIso(p.capturedAt),
-      rankScore: p.rankScore,
-    }));
-  }
 
   const tracked: TTrackedRow[] = trackedAccounts.map((row) => ({
     id: row.id,
@@ -188,6 +178,22 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     getRecentCompletedSessions(200),
   ]);
 
+  const recentSessionAccountIds = [...new Set(recentSessionsRaw.map((r) => r.trackedAccountId))];
+  const timelineAccountIds = [...new Set([...trackedIds, ...recentSessionAccountIds])];
+  const timelinesRaw = await getRankTimelinesByTrackedAccountIds(timelineAccountIds, 168);
+  const timelines: Record<
+    string,
+    Array<{ capturedAt: string; rankScore: number }>
+  > = {};
+  for (const [tid, pts] of Object.entries(timelinesRaw)) {
+    timelines[tid] = pts.map((p) => ({
+      capturedAt: toIso(p.capturedAt),
+      rankScore: p.rankScore,
+    }));
+  }
+
+  const granularSnapshotsByAccount = await buildGranularSnapshotsByAccount(recentSessionsRaw);
+
   const openSessionByTrackedId: Record<
     string,
     {
@@ -218,7 +224,12 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     };
   }
 
-  const sessionIds = recentSessionsRaw.map((r) => r.sessionId);
+  const sessionIds = [
+    ...new Set([
+      ...recentSessionsRaw.map((r) => r.sessionId),
+      ...openSessionSummaries.map((o) => o.sessionId),
+    ]),
+  ];
   const segmentsBySession: Record<string, Awaited<ReturnType<typeof getSegmentsBySession>>> = {};
   await Promise.all(
     sessionIds.map(async (sid) => {
@@ -226,39 +237,20 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     })
   );
 
-  const recentSessions = recentSessionsRaw.map((r) => ({
-    sessionId: r.sessionId,
-    trackedAccountId: r.trackedAccountId,
-    ign: r.ign,
-    platform: r.platform,
-    startedAt: toIso(r.startedAt),
-    endedAt: toIso(r.endedAt),
-    openingRankScore: r.openingRankScore,
-    latestRankScore: r.latestRankScore,
-    openingRankName: r.openingRankName,
-    openingRankDivision: r.openingRankDivision,
-    openingRankIconUrl: r.openingRankIconUrl,
-    latestRankName: r.latestRankName,
-    latestRankDivision: r.latestRankDivision,
-    latestRankIconUrl: r.latestRankIconUrl,
-    legends: r.legends,
-    estimatedGames: (segmentsBySession[r.sessionId] ?? [])
-      .filter(segmentCountsAsInferredRankedGame)
-      .map((seg) => ({
-        legend: seg.legendAssumed,
-        rpDelta: seg.rpDelta,
-        confidence: seg.confidence,
-        mergeRisk: seg.mergeRisk,
-        startedAt: seg.startedAt instanceof Date ? seg.startedAt.toISOString() : String(seg.startedAt),
-        endedAt: seg.endedAt ? (seg.endedAt instanceof Date ? seg.endedAt.toISOString() : String(seg.endedAt)) : null,
-        rankedMapNameOpen: seg.rankedMapNameOpen,
-        rankedMapNameClose: seg.rankedMapNameClose,
-        openingCareerKills: seg.openingCareerKills,
-        closingCareerKills: seg.closingCareerKills,
-        openingCareerDamage: seg.openingCareerDamage,
-        closingCareerDamage: seg.closingCareerDamage,
-      })),
-  }));
+  const completedRecentSessions = mapSessionsToRecentSessionRows(
+    recentSessionsRaw,
+    segmentsBySession,
+    granularSnapshotsByAccount
+  );
+  const accountByTrackedId = new Map(
+    trackedAccounts.map((a) => [a.id, { ign: a.ign, platform: a.platform }])
+  );
+  const activeRecentSessions = await mapOpenSessionsToRecentSessionRows(
+    openSessionSummaries,
+    accountByTrackedId,
+    segmentsBySession
+  );
+  const recentSessions = [...activeRecentSessions, ...completedRecentSessions];
 
   pageLog("dashboard db load", {
     guildFilter: guildFilter ?? null,

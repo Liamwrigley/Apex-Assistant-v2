@@ -240,6 +240,30 @@ export async function getRankTimelineByTrackedAccountId(
   return result.rows;
 }
 
+/** All rank snapshots in [startedAt, endedAt] (no hourly dedupe). For session-scoped sparklines. */
+export async function getRankSnapshotsBetween(
+  trackedAccountId: string,
+  startedAt: Date | string,
+  endedAt: Date | string
+): Promise<Array<{ capturedAt: Date; rankScore: number }>> {
+  const result = await pool.query<{ capturedAt: Date; rankScore: number }>(
+    `
+    select
+      rs.captured_at as "capturedAt",
+      rs.rank_score as "rankScore"
+    from rank_snapshots rs
+    join tracked_accounts ta on ta.id = rs.tracked_account_id
+    where rs.tracked_account_id = $1
+      and ta.is_active = true
+      and rs.captured_at >= $2::timestamptz
+      and rs.captured_at <= $3::timestamptz
+    order by rs.captured_at asc, rs.id asc
+    `,
+    [trackedAccountId, startedAt, endedAt]
+  );
+  return result.rows;
+}
+
 export async function getRankTimelinesByTrackedAccountIds(
   trackedAccountIds: string[],
   hours = 168

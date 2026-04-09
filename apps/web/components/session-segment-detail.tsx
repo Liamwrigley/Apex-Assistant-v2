@@ -2,23 +2,12 @@
 
 import { useState } from "react";
 import { RpDeltaBadge } from "@/components/rp-delta-badge";
+import { SessionGamesSummary } from "@/components/session-segments-list";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
 import { formatDurationMs } from "@/lib/format-duration";
+import type { TSegmentRow } from "@/components/session-segment-types";
 
-export type TSegmentRow = {
-  legendAssumed: string | null;
-  rpDelta: number | null;
-  confidence: string;
-  mergeRisk: boolean;
-  startedAt: string;
-  endedAt: string | null;
-  rankedMapNameOpen: string | null;
-  rankedMapNameClose: string | null;
-  openingCareerKills: number | null;
-  closingCareerKills: number | null;
-  openingCareerDamage: number | null;
-  closingCareerDamage: number | null;
-};
+export type { TSegmentRow };
 
 function delta(open: number | null, close: number | null): number | null {
   return open != null && close != null ? close - open : null;
@@ -29,8 +18,6 @@ export function SessionSegmentDetail(props: { segments: TSegmentRow[] }) {
   const segs = props.segments;
   if (segs.length === 0) return <span className="text-muted-foreground text-xs">—</span>;
 
-  const totalRp = segs.reduce((s, g) => s + (g.rpDelta ?? 0), 0);
-
   return (
     <div>
       <button
@@ -39,8 +26,7 @@ export function SessionSegmentDetail(props: { segments: TSegmentRow[] }) {
         onClick={() => setOpen((v) => !v)}
       >
         <span className="text-muted-foreground text-[10px]">{open ? "▾" : "▸"}</span>
-        <span>{segs.length} game{segs.length !== 1 ? "s" : ""}</span>
-        <RpDeltaBadge delta={totalRp} />
+        <SessionGamesSummary segments={segs} />
       </button>
       {open ? (
         <div className="mt-1.5 overflow-x-auto rounded-md border border-border/50 bg-card">
