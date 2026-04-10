@@ -16,7 +16,7 @@ import {
   getRankMovers24h,
   getRankTimelinesByTrackedAccountIds,
   getRecentCompletedSessions,
-  getSegmentsBySession,
+  getSegmentsBySessionIds,
   listTrackedAccounts,
 } from "@apex-assistant/db";
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
@@ -122,10 +122,11 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
   >;
   recentSessions: TRecentSessionRow[];
 }> {
-  const [leaderboardRows, trackedAccounts, stats24h] = await Promise.all([
+  const [leaderboardRows, trackedAccounts, stats24h, recentSessionsRaw] = await Promise.all([
     getLeaderboardWithDelta24h(guildFilter),
     listTrackedAccounts(guildFilter),
     getRankMovers24h(guildFilter),
+    getRecentCompletedSessions(200),
   ]);
 
   const leaderboard = [...leaderboardRows]
@@ -173,14 +174,15 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
   }));
 
   const allTrackedAccountIds = trackedAccounts.map((r) => r.id);
-  const [openSessionSummaries, recentSessionsRaw] = await Promise.all([
-    getOpenSessionSummariesForTrackedAccountIds(allTrackedAccountIds),
-    getRecentCompletedSessions(200),
-  ]);
-
   const recentSessionAccountIds = [...new Set(recentSessionsRaw.map((r) => r.trackedAccountId))];
   const timelineAccountIds = [...new Set([...trackedIds, ...recentSessionAccountIds])];
-  const timelinesRaw = await getRankTimelinesByTrackedAccountIds(timelineAccountIds, 168);
+
+  const [openSessionSummaries, timelinesRaw, granularSnapshotsByAccount] = await Promise.all([
+    getOpenSessionSummariesForTrackedAccountIds(allTrackedAccountIds),
+    getRankTimelinesByTrackedAccountIds(timelineAccountIds, 168),
+    buildGranularSnapshotsByAccount(recentSessionsRaw),
+  ]);
+
   const timelines: Record<
     string,
     Array<{ capturedAt: string; rankScore: number }>
@@ -191,8 +193,6 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       rankScore: p.rankScore,
     }));
   }
-
-  const granularSnapshotsByAccount = await buildGranularSnapshotsByAccount(recentSessionsRaw);
 
   const openSessionByTrackedId: Record<
     string,
@@ -230,12 +230,7 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       ...openSessionSummaries.map((o) => o.sessionId),
     ]),
   ];
-  const segmentsBySession: Record<string, Awaited<ReturnType<typeof getSegmentsBySession>>> = {};
-  await Promise.all(
-    sessionIds.map(async (sid) => {
-      segmentsBySession[sid] = await getSegmentsBySession(sid);
-    })
-  );
+  const segmentsBySession = await getSegmentsBySessionIds(sessionIds);
 
   const completedRecentSessions = mapSessionsToRecentSessionRows(
     recentSessionsRaw,

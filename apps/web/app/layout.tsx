@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 import "./globals.css";
 import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
-import { SiteHeader } from "@/components/site-header";
+import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
 import type { Metadata } from "next";
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
@@ -21,7 +21,9 @@ export default function RootLayout(props: { children: ReactNode }) {
     <html lang="en" className={cn("dark font-sans", geist.variable)}>
       <body className="min-h-full antialiased">
         <div className="mx-auto w-full max-w-6xl px-6 pt-6">
-          <SiteHeader />
+          <Suspense fallback={<SiteHeaderFallback />}>
+            <SiteHeader />
+          </Suspense>
         </div>
         {props.children}
       </body>

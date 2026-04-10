@@ -211,6 +211,25 @@ export async function getSegmentsBySession(
   return result.rows;
 }
 
+/** Batch-fetch segments for multiple sessions in a single query. */
+export async function getSegmentsBySessionIds(
+  sessionIds: string[]
+): Promise<Record<string, TInferredGameSegment[]>> {
+  if (sessionIds.length === 0) return {};
+  const result = await pool.query<TInferredGameSegment>(
+    `select ${SEGMENT_FIELDS}
+     from inferred_game_segments
+     where play_session_id = any($1::uuid[])
+     order by started_at asc`,
+    [sessionIds]
+  );
+  const grouped: Record<string, TInferredGameSegment[]> = {};
+  for (const row of result.rows) {
+    (grouped[row.playSessionId] ??= []).push(row);
+  }
+  return grouped;
+}
+
 export async function getRecentSegmentsByAccount(
   trackedAccountId: string,
   limit = 50

@@ -10,6 +10,7 @@ export type TStatsRank = {
   externalPlayerId?: string | null;
   playerName?: string | null;
   currentLevel?: number | null;
+  /** Legacy: mixed API aggregate from `total.*` — not guaranteed global career. */
   careerKills?: number | null;
   careerDamage?: number | null;
   careerWins?: number | null;
@@ -24,6 +25,17 @@ export type TStatsRank = {
     currentStateSinceTimestamp?: number | null;
     currentStateAsText?: string | null;
   };
+};
+
+/** One tracker row from `legends.selected` or `legends.all[legend].data[]`. */
+export type TTrackerObservation = {
+  legendName: string;
+  trackerKey: string;
+  displayName: string;
+  value: number;
+  globalFlag: boolean | null;
+  dataIndex: number;
+  source: "selected" | "all";
 };
 
 export type TStatsSearchCandidate = {
@@ -106,6 +118,86 @@ function getApexApiConfig(): { baseUrl: string; key: string } {
   };
 }
 
+/** Normalize legend bucket names for stable (legend, key) series. */
+export function normalizeLegendName(name: string): string {
+  return name.trim();
+}
+
+type TLegendDataEntry = {
+  name?: string;
+  value?: number;
+  key?: string;
+  global?: boolean;
+};
+
+type TLegendBucket = {
+  data?: TLegendDataEntry[];
+  LegendName?: string;
+  ImgAssets?: unknown;
+  gameInfo?: unknown;
+};
+
+type TLegendsPayload = {
+  selected?: TLegendBucket & { LegendName?: string };
+  all?: Record<string, TLegendBucket>;
+};
+
+/**
+ * Build tracker observations from `legends.selected` and `legends.all` (when ingestAllLegends is true).
+ */
+export function parseTrackerObservations(
+  legends: TLegendsPayload | undefined,
+  options: { ingestAllLegends: boolean }
+): TTrackerObservation[] {
+  const out: TTrackerObservation[] = [];
+
+  const pushRows = (
+    legendName: string,
+    data: TLegendDataEntry[] | undefined,
+    source: "selected" | "all"
+  ) => {
+    const normLegend = normalizeLegendName(legendName);
+    if (!data?.length) return;
+    data.forEach((entry, dataIndex) => {
+      const key = typeof entry.key === "string" && entry.key.length > 0 ? entry.key : null;
+      if (!key) return;
+      const value =
+        typeof entry.value === "number" && Number.isFinite(entry.value) ? entry.value : null;
+      if (value === null) return;
+      const displayName = typeof entry.name === "string" ? entry.name : key;
+      const globalFlag =
+        typeof entry.global === "boolean" ? entry.global : null;
+      out.push({
+        legendName: normLegend,
+        trackerKey: key,
+        displayName,
+        value,
+        globalFlag,
+        dataIndex,
+        source,
+      });
+    });
+  };
+
+  const selected = legends?.selected;
+  const selectedName =
+    typeof selected?.LegendName === "string" && selected.LegendName.length > 0
+      ? selected.LegendName
+      : null;
+  if (selectedName) {
+    pushRows(selectedName, selected?.data, "selected");
+  }
+
+  if (options.ingestAllLegends && legends?.all) {
+    for (const [legendKey, bucket] of Object.entries(legends.all)) {
+      if (legendKey === "selected") continue;
+      pushRows(legendKey, bucket?.data, "all");
+    }
+  }
+
+  return out;
+}
+
 async function fetchApexLegendsApiProfile(input: {
   ign: string;
   platform: TPlatform;
@@ -113,6 +205,7 @@ async function fetchApexLegendsApiProfile(input: {
 }): Promise<{
   rank: TStatsRank;
   externalPlayerId: string | null;
+  trackerObservations: TTrackerObservation[];
 }> {
   const config = getApexApiConfig();
   const userQuery = input.externalPlayerId
@@ -151,11 +244,7 @@ async function fetchApexLegendsApiProfile(input: {
         rankImg?: string;
       };
     };
-    total?: {
-      career_kills?: { value?: number } | number;
-      damage?: { value?: number } | number;
-      career_wins?: { value?: number } | number;
-    };
+    total?: Record<string, { name?: string; value?: number | string } | number | undefined>;
     realtime?: {
       lobbyState?: string;
       isOnline?: number;
@@ -167,6 +256,7 @@ async function fetchApexLegendsApiProfile(input: {
       currentStateSinceTimestamp?: number;
       currentStateAsText?: string;
     };
+    legends?: TLegendsPayload;
   };
 
   if (payload.Error) {
@@ -186,11 +276,15 @@ async function fetchApexLegendsApiProfile(input: {
     if (typeof value === "number") {
       return Number.isFinite(value) ? value : null;
     }
-    if (value && typeof value.value === "number" && Number.isFinite(value.value)) {
+    if (value && typeof value === "object" && typeof value.value === "number" && Number.isFinite(value.value)) {
       return value.value;
     }
     return null;
   };
+
+  const ingestAllLegends = process.env.APEX_INGEST_ALL_LEGEND_TRACKERS === "true";
+  const trackerObservations = parseTrackerObservations(payload.legends, { ingestAllLegends });
+
   return {
     rank: {
       rankScore: rank.rankScore,
@@ -200,9 +294,9 @@ async function fetchApexLegendsApiProfile(input: {
       externalPlayerId,
       playerName: payload.global?.name ?? null,
       currentLevel: typeof payload.global?.level === "number" ? payload.global.level : null,
-      careerKills: toTotalNumber(payload.total?.career_kills),
-      careerDamage: toTotalNumber(payload.total?.damage),
-      careerWins: toTotalNumber(payload.total?.career_wins),
+      careerKills: toTotalNumber(payload.total?.career_kills as { value?: number } | number | undefined),
+      careerDamage: toTotalNumber(payload.total?.damage as { value?: number } | number | undefined),
+      careerWins: toTotalNumber(payload.total?.career_wins as { value?: number } | number | undefined),
       realtime: {
         lobbyState: payload.realtime?.lobbyState ?? null,
         isOnline: typeof payload.realtime?.isOnline === "number" ? payload.realtime.isOnline : null,
@@ -218,8 +312,25 @@ async function fetchApexLegendsApiProfile(input: {
         currentStateAsText: payload.realtime?.currentStateAsText ?? null
       }
     },
-    externalPlayerId
+    externalPlayerId,
+    trackerObservations
   };
+}
+
+/**
+ * Full profile fetch for ingestion: rank + tracker rows (selected + optional all legends).
+ * Use this in the worker instead of `getRank` to persist tracker observations in one HTTP round-trip.
+ */
+export async function fetchApexProfileForIngest(input: {
+  ign: string;
+  platform: TPlatform;
+  externalPlayerId?: string | null;
+}): Promise<{
+  rank: TStatsRank;
+  externalPlayerId: string | null;
+  trackerObservations: TTrackerObservation[];
+}> {
+  return fetchApexLegendsApiProfile(input);
 }
 
 async function fetchApexLegendsApiRank(input: {
@@ -240,8 +351,6 @@ async function searchApexLegendsApiPlayers(input: {
     return [];
   }
 
-  // ApexLegendsAPI does not consistently expose a public fuzzy search endpoint.
-  // Fallback strategy: probe profile lookup for one or all platforms.
   const platforms: TPlatform[] = input.platform ? [input.platform] : ["origin", "psn", "xbl"];
   const candidates: TStatsSearchCandidateExt[] = [];
   for (const platform of platforms) {

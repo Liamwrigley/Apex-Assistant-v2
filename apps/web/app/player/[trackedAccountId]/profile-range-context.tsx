@@ -12,6 +12,7 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 import type { TLegendAggregate, TMapAggregate, TMapLegendAggregate } from "@apex-assistant/db";
+import type { TTrackerRowUi } from "@/lib/tracker-profile-rows";
 
 export type TProfileRangePayload = {
   rangeKey: string;
@@ -19,11 +20,24 @@ export type TProfileRangePayload = {
   legendAggregates: TLegendAggregate[];
   mapAggregates: TMapAggregate[];
   mapLegendAggregates: TMapLegendAggregate[];
+  /** Legacy: deltas from player_stat_snapshots + tracked_accounts — mixed API totals, not per-legend trackers. */
   careerDeltas: {
     deltaKills: number | null;
     deltaDamage: number | null;
     deltaWins: number | null;
   };
+  /** Per–(legend, key) tracker rows for the selected legend (latest snapshot + range deltas). */
+  trackerRows: TTrackerRowUi[];
+  /** Realtime-selected legend name from last sync (for labeling). */
+  selectedLegend: string | null;
+  /** Whether we have any tracker_observations rows for this account (sync has run with new ingestion). */
+  hasTrackerObservations: boolean;
+  /** Legacy `total.*`-style values on tracked_accounts — labeled separately in UI. */
+  legacyApiSummary: {
+    kills: number | null;
+    damage: number | null;
+    wins: number | null;
+  } | null;
 };
 
 type TContextValue = TProfileRangePayload & {

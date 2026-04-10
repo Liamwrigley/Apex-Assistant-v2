@@ -1,5 +1,6 @@
 import {
   derivePresenceFromRealtimeFields,
+  fetchApexProfileForIngest,
   getStatsProvider,
   toRealtimePresenceFieldsFromRankRealtime,
   toRealtimePresenceFieldsFromTrackedAccount,
@@ -12,6 +13,7 @@ import {
   hasIgnConflictForDifferentExternalId,
   insertPlayerStatsSnapshot,
   insertRankSnapshot,
+  insertTrackerObservationsBatch,
   insertPresenceSnapshotIfChanged,
   listTrackedAccountsByGuild,
   releaseTrackedAccountClaim,
@@ -78,11 +80,12 @@ export async function ingestGuild(guildId: string): Promise<{ processed: number;
 export async function ingestTrackedAccount(account: TTrackedAccount): Promise<void> {
   const startedAt = Date.now();
   try {
-    const rank = await statsProvider.getRank({
+    const profile = await fetchApexProfileForIngest({
       ign: account.ign,
       platform: account.platform,
       externalPlayerId: account.externalPlayerId
     });
+    const rank = profile.rank;
     const canRenameFromProfile =
       Boolean(account.externalPlayerId) &&
       Boolean(rank.externalPlayerId) &&
@@ -191,6 +194,21 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       careerDamage: rank.careerDamage ?? null,
       careerWins: rank.careerWins ?? null,
       realtime: rank.realtime ?? null
+    });
+    const pollAt = new Date();
+    await insertTrackerObservationsBatch({
+      trackedAccountId: account.id,
+      capturedAt: pollAt,
+      selectedLegendAtPoll: rank.realtime?.selectedLegend ?? null,
+      rows: profile.trackerObservations.map((o) => ({
+        legendName: o.legendName,
+        trackerKey: o.trackerKey,
+        displayName: o.displayName,
+        value: o.value,
+        globalFlag: o.globalFlag,
+        dataIndex: o.dataIndex,
+        source: o.source
+      }))
     });
     await autoLinkTrackedAccountByExactFingerprint({
       trackedAccountId: account.id,

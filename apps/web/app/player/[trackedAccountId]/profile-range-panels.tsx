@@ -14,12 +14,6 @@ import { useCallback, useMemo, useState } from "react";
 import type { TMapLegendAggregate } from "@apex-assistant/db";
 import { useProfileRange } from "./profile-range-context";
 
-type TAccountCareer = {
-  careerKills: number | null;
-  careerDamage: number | null;
-  careerWins: number | null;
-};
-
 export function PlayerProfileLatestRpInline() {
   const { timelinePoints } = useProfileRange();
   const latestScore =
@@ -59,9 +53,18 @@ export function PlayerProfileHeroImage(props: {
   );
 }
 
-export function PlayerProfileRangeStatsCareer(props: { account: TAccountCareer }) {
-  const { rangeKey, legendAggregates, careerDeltas, rangeLoading, timelinePoints } =
-    useProfileRange();
+export function PlayerProfileRangeStatsCareer() {
+  const {
+    rangeKey,
+    legendAggregates,
+    careerDeltas,
+    rangeLoading,
+    timelinePoints,
+    trackerRows,
+    selectedLegend,
+    hasTrackerObservations,
+    legacyApiSummary,
+  } = useProfileRange();
 
   /** Matches the RP sparkline: last snapshot minus first in this range (rank_snapshots), not inferred segment sums. */
   const netRpDelta = useMemo(() => {
@@ -86,10 +89,17 @@ export function PlayerProfileRangeStatsCareer(props: { account: TAccountCareer }
 
   const totalGames = legendAggregates.reduce((s, r) => s + r.games, 0);
 
-  const showCareer =
-    props.account.careerKills !== null ||
-    props.account.careerDamage !== null ||
-    props.account.careerWins !== null;
+  const hasLegacyNumbers =
+    legacyApiSummary != null &&
+    (legacyApiSummary.kills != null ||
+      legacyApiSummary.damage != null ||
+      legacyApiSummary.wins != null);
+
+  const showTrackerCard =
+    trackerRows.length > 0 ||
+    hasTrackerObservations ||
+    Boolean(selectedLegend?.trim()) ||
+    hasLegacyNumbers;
 
   return (
     <>
@@ -166,56 +176,101 @@ export function PlayerProfileRangeStatsCareer(props: { account: TAccountCareer }
         </Card>
       </div>
 
-      {showCareer ? (
+      {showTrackerCard ? (
         <Card
           className={`border-border/80 bg-muted/25 ${rangeLoading ? "opacity-70" : ""} transition-opacity`}
         >
-          <CardContent className="p-0 px-4 py-3.5 sm:px-5">
-            <div className="mb-3 flex items-center gap-3">
-              <span
-                className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent"
-                aria-hidden
-              />
-              <span className="text-muted-foreground flex shrink-0 flex-col items-center gap-0.5 text-center">
-                <span className="text-[10px] font-medium uppercase tracking-[0.18em]">Career</span>
-                <span className="text-[10px] font-normal normal-case tracking-normal text-muted-foreground/90">
-                  Δ vs {rangeKey}
-                </span>
-              </span>
-              <span
-                className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent"
-                aria-hidden
-              />
-            </div>
-            <div className="grid grid-cols-3 divide-x divide-border/60">
-              <div className="min-w-0 pr-4 sm:pr-8">
-                <p className="text-muted-foreground text-[11px] tracking-wide">Kills</p>
-                <p className="mt-0.5 truncate text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">
-                  {props.account.careerKills?.toLocaleString() ?? "—"}
-                </p>
-                <div className="mt-1.5">
-                  <RpDeltaBadge delta={careerDeltas.deltaKills} />
-                </div>
+          <CardHeader className="space-y-1 pb-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <CardTitle className="text-base">
+                  {selectedLegend ? (
+                    <>Equipped trackers · <span className="text-muted-foreground font-normal">{selectedLegend}</span></>
+                  ) : (
+                    "Equipped trackers"
+                  )}
+                </CardTitle>
               </div>
-              <div className="min-w-0 px-4 sm:px-8">
-                <p className="text-muted-foreground text-[11px] tracking-wide">Damage</p>
-                <p className="mt-0.5 truncate text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">
-                  {props.account.careerDamage?.toLocaleString() ?? "—"}
-                </p>
-                <div className="mt-1.5">
-                  <RpDeltaBadge delta={careerDeltas.deltaDamage} />
-                </div>
-              </div>
-              <div className="min-w-0 pl-4 sm:pl-8">
-                <p className="text-muted-foreground text-[11px] tracking-wide">Wins</p>
-                <p className="mt-0.5 truncate text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">
-                  {props.account.careerWins?.toLocaleString() ?? "—"}
-                </p>
-                <div className="mt-1.5">
-                  <RpDeltaBadge delta={careerDeltas.deltaWins} />
+              <div className="group relative shrink-0">
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground flex h-5 w-5 items-center justify-center rounded-full border border-border/60 text-[10px] font-semibold transition-colors"
+                  aria-label="About equipped trackers"
+                >
+                  i
+                </button>
+                <div className="pointer-events-none absolute right-0 top-full z-50 mt-1.5 w-64 rounded-md border bg-popover p-3 text-xs text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+                  Values come from the API for your selected legend&apos;s tracker slots. They are not full
+                  account-wide career totals. Equip the trackers you care about on that legend to see them here.
                 </div>
               </div>
             </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {trackerRows.length > 0 ? (
+              <div className="divide-y divide-border/50 rounded-md border border-border/40">
+                {trackerRows.map((row) => (
+                  <div
+                    key={`${row.trackerKey}-${row.dataIndex}`}
+                    className="flex flex-wrap items-start justify-between gap-3 px-3 py-2.5 last:pb-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium leading-tight">{row.displayName}</p>
+                      <p className="text-muted-foreground font-mono text-[10px]">{row.trackerKey}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold tabular-nums">{row.value.toLocaleString()}</p>
+                      <div className="mt-0.5 flex justify-end">
+                        <span className="text-muted-foreground text-[10px]">Δ {rangeKey}</span>:{" "}
+                        <RpDeltaBadge delta={row.delta} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                {!hasTrackerObservations
+                  ? "No tracker data yet — stats appear after the next sync."
+                  : selectedLegend?.trim()
+                    ? "No data for this legend yet."
+                    : "Select a legend in-game to see tracker stats."}
+              </p>
+            )}
+
+            {hasLegacyNumbers ? (
+              <div className="border-border/60 border-t pt-4">
+                <div className="grid grid-cols-3 divide-x divide-border/60">
+                  <div className="min-w-0 pr-3 sm:pr-6">
+                    <p className="text-muted-foreground text-[11px] tracking-wide">Kills</p>
+                    <p className="mt-0.5 truncate text-lg font-semibold tracking-tight tabular-nums sm:text-xl">
+                      {legacyApiSummary?.kills?.toLocaleString() ?? "—"}
+                    </p>
+                    <div className="mt-1">
+                      <RpDeltaBadge delta={careerDeltas.deltaKills} />
+                    </div>
+                  </div>
+                  <div className="min-w-0 px-3 sm:px-6">
+                    <p className="text-muted-foreground text-[11px] tracking-wide">Damage</p>
+                    <p className="mt-0.5 truncate text-lg font-semibold tracking-tight tabular-nums sm:text-xl">
+                      {legacyApiSummary?.damage?.toLocaleString() ?? "—"}
+                    </p>
+                    <div className="mt-1">
+                      <RpDeltaBadge delta={careerDeltas.deltaDamage} />
+                    </div>
+                  </div>
+                  <div className="min-w-0 pl-3 sm:pl-6">
+                    <p className="text-muted-foreground text-[11px] tracking-wide">Wins</p>
+                    <p className="mt-0.5 truncate text-lg font-semibold tracking-tight tabular-nums sm:text-xl">
+                      {legacyApiSummary?.wins?.toLocaleString() ?? "—"}
+                    </p>
+                    <div className="mt-1">
+                      <RpDeltaBadge delta={careerDeltas.deltaWins} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

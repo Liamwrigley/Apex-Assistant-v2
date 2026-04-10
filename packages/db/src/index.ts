@@ -8,3 +8,4 @@ export * from "./repositories/presenceSnapshotsRepo.js";
 export * from "./repositories/gameSegmentsRepo.js";
 export * from "./repositories/voiceIntervalsRepo.js";
 export * from "./repositories/partyEdgesRepo.js";
+export * from "./repositories/trackerObservationsRepo.js";

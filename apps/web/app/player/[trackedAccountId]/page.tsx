@@ -5,12 +5,16 @@ import {
   getRankTimelineByTrackedAccountId,
   getRecentCompletedSessionsByAccount,
   getOpenSessionSummariesForTrackedAccountIds,
-  getSegmentsBySession,
+  getSegmentsBySessionIds,
   getLegendAggregatesByAccount,
   getMapAggregatesByAccount,
   getMapLegendAggregatesByAccount,
   getCareerStatDeltasForTrackedAccount,
+  getLatestTrackerSnapshotForLegend,
+  getTrackerStatDeltasForTrackedAccount,
+  hasAnyTrackerObservations,
 } from "@apex-assistant/db";
+import { buildTrackerRowsForProfile } from "@/lib/tracker-profile-rows";
 import {
   PlayerProfileRangeProvider,
   PlayerProfileRangePicker,
@@ -132,14 +136,16 @@ export default async function PlayerProfilePage(props: {
     notFound();
   }
 
+  const rawRange = searchParams.range ?? "7d";
+  const rangeKey = rawRange in HOUR_OPTIONS ? rawRange : "7d";
+  const hours = HOUR_OPTIONS[rangeKey];
+
   const account = await getTrackedAccountById(trackedAccountId);
   if (!account) {
     notFound();
   }
 
-  const rawRange = searchParams.range ?? "7d";
-  const rangeKey = rawRange in HOUR_OPTIONS ? rawRange : "7d";
-  const hours = HOUR_OPTIONS[rangeKey];
+  const selectedLegend = account.realtimeSelectedLegend ?? null;
 
   const [
     timelineRaw,
@@ -149,6 +155,9 @@ export default async function PlayerProfilePage(props: {
     mapAggregates,
     mapLegendAggregates,
     careerDeltas,
+    trackerSnapshot,
+    trackerDeltas,
+    hasTrackerObservations,
   ] = await Promise.all([
     getRankTimelineByTrackedAccountId(trackedAccountId, hours),
     getRecentCompletedSessionsByAccount(trackedAccountId, 30),
@@ -157,12 +166,17 @@ export default async function PlayerProfilePage(props: {
     getMapAggregatesByAccount(trackedAccountId, hours),
     getMapLegendAggregatesByAccount(trackedAccountId, hours),
     getCareerStatDeltasForTrackedAccount(trackedAccountId, hours),
+    getLatestTrackerSnapshotForLegend(trackedAccountId, selectedLegend ?? ""),
+    getTrackerStatDeltasForTrackedAccount(trackedAccountId, hours),
+    hasAnyTrackerObservations(trackedAccountId),
   ]);
 
   const timelinePoints = timelineRaw.map((p) => ({
     capturedAt: toIso(p.capturedAt),
     rankScore: p.rankScore,
   }));
+
+  const trackerRows = buildTrackerRowsForProfile(trackerSnapshot, trackerDeltas, selectedLegend);
 
   const initialRangePayload: TProfileRangePayload = {
     rangeKey,
@@ -171,6 +185,14 @@ export default async function PlayerProfilePage(props: {
     mapAggregates,
     mapLegendAggregates,
     careerDeltas,
+    trackerRows,
+    selectedLegend,
+    hasTrackerObservations,
+    legacyApiSummary: {
+      kills: account.careerKills,
+      damage: account.careerDamage,
+      wins: account.careerWins,
+    },
   };
 
   const openSession = openSessionSummaries[0] ?? null;
@@ -181,14 +203,12 @@ export default async function PlayerProfilePage(props: {
       ...openSessionSummaries.map((o) => o.sessionId),
     ]),
   ];
-  const segmentsBySession: Record<string, Awaited<ReturnType<typeof getSegmentsBySession>>> = {};
-  await Promise.all(
-    sessionIds.map(async (sid) => {
-      segmentsBySession[sid] = await getSegmentsBySession(sid);
-    })
-  );
 
-  const granularSnapshotsByAccount = await buildGranularSnapshotsByAccount(recentSessions);
+  const [segmentsBySession, granularSnapshotsByAccount] = await Promise.all([
+    getSegmentsBySessionIds(sessionIds),
+    buildGranularSnapshotsByAccount(recentSessions),
+  ]);
+
   const completedSessionRows = mapSessionsToRecentSessionRows(
     recentSessions,
     segmentsBySession,
@@ -356,13 +376,7 @@ export default async function PlayerProfilePage(props: {
 
         {/* Right: stats summary + current session / offline — fills grid row height */}
         <div className="flex min-h-[400px] flex-col gap-4 md:h-full md:min-h-0">
-          <PlayerProfileRangeStatsCareer
-            account={{
-              careerKills: account.careerKills,
-              careerDamage: account.careerDamage,
-              careerWins: account.careerWins,
-            }}
-          />
+          <PlayerProfileRangeStatsCareer />
 
           {/* Current session (live) vs offline */}
           {openSession || !isOnline ? (

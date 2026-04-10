@@ -60,11 +60,10 @@ function confidenceTier(score: number): string {
 }
 
 export default async function DebugPartyPage() {
-  const guildId = process.env.DISCORD_GUILD_ID ?? "";
   const [voiceIntervals, partyEdges, accounts] = await Promise.all([
-    getRecentVoiceIntervals(guildId, 200),
-    getRecentPartyEdges(guildId, 200),
-    listTrackedAccounts(guildId || undefined),
+    getRecentVoiceIntervals(undefined, 200),
+    getRecentPartyEdges(undefined, 200),
+    listTrackedAccounts(),
   ]);
 
   const ownerDisplay = new Map<string, string>();

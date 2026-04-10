@@ -110,16 +110,17 @@ export async function getVoiceIntervalsForUser(
 
 /** Recent voice intervals for a guild (debug / dashboard). */
 export async function getRecentVoiceIntervals(
-  guildId: string,
+  guildId?: string,
   limit = 100,
 ): Promise<TVoiceInterval[]> {
+  const hasGuild = typeof guildId === "string" && guildId.length > 0;
   const result = await pool.query<TVoiceInterval>(
     `select ${FIELDS}
      from discord_voice_intervals
-     where guild_id = $1
+     where ($1::text is null or guild_id = $1)
      order by joined_at desc
      limit $2`,
-    [guildId, limit],
+    [hasGuild ? guildId : null, limit],
   );
   return result.rows;
 }

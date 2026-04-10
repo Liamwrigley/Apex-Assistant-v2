@@ -57,7 +57,7 @@ export async function upsertPartyEdge(input: {
 
 /** Recent edges for debug view. */
 export async function getRecentPartyEdges(
-  guildId: string,
+  guildId?: string,
   limit = 200,
 ): Promise<Array<
   TPartySegmentEdge & {
@@ -71,6 +71,7 @@ export async function getRecentPartyEdges(
     segStartB: Date;
   }
 >> {
+  const hasGuild = typeof guildId === "string" && guildId.length > 0;
   const result = await pool.query(
     `select
        e.id,
@@ -95,10 +96,10 @@ export async function getRecentPartyEdges(
      join inferred_game_segments seg_b on seg_b.id = e.segment_id_b
      join tracked_accounts ta_a on ta_a.id = e.tracked_account_id_a
      join tracked_accounts ta_b on ta_b.id = e.tracked_account_id_b
-     where e.guild_id = $1
+     where ($1::text is null or e.guild_id = $1)
      order by e.created_at desc
      limit $2`,
-    [guildId, limit],
+    [hasGuild ? guildId : null, limit],
   );
   return result.rows;
 }

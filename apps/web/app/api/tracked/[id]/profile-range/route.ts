@@ -4,7 +4,12 @@ import {
   getMapAggregatesByAccount,
   getMapLegendAggregatesByAccount,
   getRankTimelineByTrackedAccountId,
+  getTrackedAccountById,
+  getLatestTrackerSnapshotForLegend,
+  getTrackerStatDeltasForTrackedAccount,
+  hasAnyTrackerObservations,
 } from "@apex-assistant/db";
+import { buildTrackerRowsForProfile } from "@/lib/tracker-profile-rows";
 import { NextResponse } from "next/server";
 import { toApiError } from "@/app/api/_lib/responses";
 
@@ -37,13 +42,34 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
     }
     const hours = HOUR_OPTIONS[rangeKey] ?? 168;
 
-    const [timelineRaw, legendAggregates, mapAggregates, mapLegendAggregates, careerDeltas] = await Promise.all([
+    const account = await getTrackedAccountById(id);
+    if (!account) {
+      return NextResponse.json({ error: "Account not found" }, { status: 404 });
+    }
+
+    const selectedLegend = account.realtimeSelectedLegend ?? null;
+
+    const [
+      timelineRaw,
+      legendAggregates,
+      mapAggregates,
+      mapLegendAggregates,
+      careerDeltas,
+      trackerSnapshot,
+      trackerDeltas,
+      hasTrackerObservations,
+    ] = await Promise.all([
       getRankTimelineByTrackedAccountId(id, hours),
       getLegendAggregatesByAccount(id, hours),
       getMapAggregatesByAccount(id, hours),
       getMapLegendAggregatesByAccount(id, hours),
       getCareerStatDeltasForTrackedAccount(id, hours),
+      getLatestTrackerSnapshotForLegend(id, selectedLegend ?? ""),
+      getTrackerStatDeltasForTrackedAccount(id, hours),
+      hasAnyTrackerObservations(id),
     ]);
+
+    const trackerRows = buildTrackerRowsForProfile(trackerSnapshot, trackerDeltas, selectedLegend);
 
     return NextResponse.json({
       rangeKey,
@@ -55,6 +81,14 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
       mapAggregates,
       mapLegendAggregates,
       careerDeltas,
+      trackerRows,
+      selectedLegend,
+      hasTrackerObservations,
+      legacyApiSummary: {
+        kills: account.careerKills,
+        damage: account.careerDamage,
+        wins: account.careerWins,
+      },
     });
   } catch (error) {
     return toApiError(error);

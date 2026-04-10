@@ -1,9 +1,90 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Plugin, TooltipItem } from "chart.js";
+import type { Chart, Plugin, TooltipItem } from "chart.js";
 import { Line } from "react-chartjs-2";
 import "@/lib/chartjs-register";
+
+const PROGRESSIVE_LINE_DURATION_MS = 1000;
+
+function easeOutCubic(t: number): number {
+  return 1 - (1 - t) ** 3;
+}
+
+type TChartWithProgressive = Chart & {
+  $progressiveLineProgress?: number;
+  $progressiveLineRafId?: number;
+};
+
+function cancelProgressiveAnimation(chart: TChartWithProgressive) {
+  if (chart.$progressiveLineRafId != null) {
+    cancelAnimationFrame(chart.$progressiveLineRafId);
+    chart.$progressiveLineRafId = undefined;
+  }
+}
+
+function startProgressiveLineAnimation(chart: TChartWithProgressive) {
+  cancelProgressiveAnimation(chart);
+  chart.$progressiveLineProgress = 0;
+  const t0 = performance.now();
+  const tick = (now: number) => {
+    const elapsed = now - t0;
+    const linear = Math.min(1, elapsed / PROGRESSIVE_LINE_DURATION_MS);
+    chart.$progressiveLineProgress = easeOutCubic(linear);
+    chart.draw();
+    if (linear < 1) {
+      chart.$progressiveLineRafId = requestAnimationFrame(tick);
+    } else {
+      chart.$progressiveLineProgress = 1;
+      chart.$progressiveLineRafId = undefined;
+      chart.draw();
+    }
+  };
+  chart.$progressiveLineRafId = requestAnimationFrame(tick);
+}
+
+/**
+ * Left-to-right clip so the line appears to draw in (similar to Chart.js “progressive line” samples).
+ */
+const progressiveLinePlugin: Plugin<"line"> = {
+  id: "progressiveLineDraw",
+  beforeInit(chart) {
+    (chart as TChartWithProgressive).$progressiveLineProgress = 0;
+  },
+  afterInit(chart) {
+    const ch = chart as TChartWithProgressive;
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      ch.$progressiveLineProgress = 1;
+      return;
+    }
+    startProgressiveLineAnimation(ch);
+  },
+  beforeDestroy(chart) {
+    cancelProgressiveAnimation(chart as TChartWithProgressive);
+  },
+  beforeDatasetDraw(chart, args) {
+    if (args.index !== 0) return;
+    const ch = chart as TChartWithProgressive;
+    const p = ch.$progressiveLineProgress ?? 1;
+    if (p >= 1) return;
+    const { ctx, chartArea } = chart;
+    if (!chartArea) return;
+    const { left, top, right, bottom } = chartArea;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, (right - left) * p, bottom - top);
+    ctx.clip();
+  },
+  afterDatasetDraw(chart, args) {
+    if (args.index !== 0) return;
+    const p = (chart as TChartWithProgressive).$progressiveLineProgress ?? 1;
+    if (p >= 1) return;
+    chart.ctx.restore();
+  },
+};
 
 type TPoint = {
   capturedAt: string;
@@ -217,10 +298,9 @@ export function PlayerTimelineSparkline(props: {
       responsive: true,
       maintainAspectRatio: false,
       layout: isProfile ? { padding: { bottom: 6 } } : undefined,
+      // Progressive draw is handled by progressiveLinePlugin (~1s); disable default dataset animation.
       animation: {
-        type: "number" as const,
-        duration: isProfile ? 1000 : 400,
-        easing: "easeOutCubic" as const,
+        duration: 0,
       },
       interaction: {
         mode: "index" as const,
@@ -311,7 +391,7 @@ export function PlayerTimelineSparkline(props: {
           key={chartKey}
           data={chartData}
           options={chartOptions}
-          plugins={[scrubLinePlugin]}
+          plugins={[progressiveLinePlugin, scrubLinePlugin]}
         />
       </div>
       {variant === "compact" && dayTickLayout.length > 0 ? (

@@ -247,3 +247,24 @@ create index if not exists idx_party_segment_edges_account_a
 
 create index if not exists idx_party_segment_edges_account_b
   on party_segment_edges (tracked_account_id_b, created_at desc);
+
+-- Per-legend tracker rows from Mozambique bridge (legends.selected / legends.all); identity is (legend_name, tracker_key, data_index).
+create table if not exists tracker_stat_observations (
+  id uuid primary key default gen_random_uuid(),
+  tracked_account_id uuid not null references tracked_accounts(id) on delete cascade,
+  captured_at timestamptz not null default now(),
+  legend_name text not null,
+  tracker_key text not null,
+  display_name text not null,
+  value double precision not null,
+  global_flag boolean,
+  data_index smallint not null default 0,
+  source text not null check (source in ('selected', 'all')),
+  selected_legend_at_poll text
+);
+
+create index if not exists idx_tracker_obs_account_legend_key_time
+  on tracker_stat_observations (tracked_account_id, legend_name, tracker_key, captured_at desc);
+
+create index if not exists idx_tracker_obs_account_time
+  on tracker_stat_observations (tracked_account_id, captured_at desc);
