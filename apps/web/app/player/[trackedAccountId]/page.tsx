@@ -38,6 +38,7 @@ import { SessionRankSnap, type TSessionRankSnap } from "@/components/session-ran
 import { formatDurationMs } from "@/lib/format-duration";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
+import { resolveProfileDisplayLegendName } from "@/lib/profile-display-legend";
 import {
   evaluateRealtimePresence,
   REALTIME_PRESENCE_MAX_AGE_MINUTES,
@@ -145,7 +146,17 @@ export default async function PlayerProfilePage(props: {
     notFound();
   }
 
-  const selectedLegend = account.realtimeSelectedLegend ?? null;
+  const lastSeenLegendIconUrl = account.realtimeSelectedLegend
+    ? getLegendIconUrl(account.realtimeSelectedLegend)
+    : null;
+  const presenceEval = evaluateRealtimePresence({
+    realtimeUpdatedAt: account.realtimeUpdatedAt ? toIso(account.realtimeUpdatedAt) : null,
+    realtimeIsOnline: account.realtimeIsOnline,
+    realtimeIsInGame: account.realtimeIsInGame,
+    realtimeCurrentState: account.realtimeCurrentState,
+    realtimeCurrentStateAsText: account.realtimeCurrentStateAsText,
+  });
+  const isOnlineForLegend = presenceEval.shouldShow;
 
   const [
     timelineRaw,
@@ -155,7 +166,6 @@ export default async function PlayerProfilePage(props: {
     mapAggregates,
     mapLegendAggregates,
     careerDeltas,
-    trackerSnapshot,
     trackerDeltas,
     hasTrackerObservations,
   ] = await Promise.all([
@@ -166,17 +176,28 @@ export default async function PlayerProfilePage(props: {
     getMapAggregatesByAccount(trackedAccountId, hours),
     getMapLegendAggregatesByAccount(trackedAccountId, hours),
     getCareerStatDeltasForTrackedAccount(trackedAccountId, hours),
-    getLatestTrackerSnapshotForLegend(trackedAccountId, selectedLegend ?? ""),
     getTrackerStatDeltasForTrackedAccount(trackedAccountId, hours),
     hasAnyTrackerObservations(trackedAccountId),
   ]);
+
+  const displayLegend = resolveProfileDisplayLegendName({
+    isOnline: isOnlineForLegend,
+    lastSeenLegendIconUrl,
+    realtimeSelectedLegend: account.realtimeSelectedLegend,
+    legendAggregates,
+  });
+
+  const trackerSnapshot = await getLatestTrackerSnapshotForLegend(
+    trackedAccountId,
+    displayLegend ?? "",
+  );
 
   const timelinePoints = timelineRaw.map((p) => ({
     capturedAt: toIso(p.capturedAt),
     rankScore: p.rankScore,
   }));
 
-  const trackerRows = buildTrackerRowsForProfile(trackerSnapshot, trackerDeltas, selectedLegend);
+  const trackerRows = buildTrackerRowsForProfile(trackerSnapshot, trackerDeltas, displayLegend);
 
   const initialRangePayload: TProfileRangePayload = {
     rangeKey,
@@ -186,7 +207,7 @@ export default async function PlayerProfilePage(props: {
     mapLegendAggregates,
     careerDeltas,
     trackerRows,
-    selectedLegend,
+    selectedLegend: displayLegend,
     hasTrackerObservations,
     legacyApiSummary: {
       kills: account.careerKills,
@@ -224,19 +245,11 @@ export default async function PlayerProfilePage(props: {
   );
   const recentSessionRows = [...activeSessionRows, ...completedSessionRows];
 
-  const lastSeenLegendUrl = account.realtimeSelectedLegend
-    ? getLegendIconUrl(account.realtimeSelectedLegend)
-    : null;
+  const lastSeenLegendUrl = lastSeenLegendIconUrl;
 
   const nowMs = Date.now();
-  const evaluation = evaluateRealtimePresence({
-    realtimeUpdatedAt: account.realtimeUpdatedAt ? toIso(account.realtimeUpdatedAt) : null,
-    realtimeIsOnline: account.realtimeIsOnline,
-    realtimeIsInGame: account.realtimeIsInGame,
-    realtimeCurrentState: account.realtimeCurrentState,
-    realtimeCurrentStateAsText: account.realtimeCurrentStateAsText,
-  });
-  const isOnline = evaluation.shouldShow;
+  const evaluation = presenceEval;
+  const isOnline = isOnlineForLegend;
   const isInGame = evaluation.status === "in_game";
 
   const sessionRpDelta = openSession

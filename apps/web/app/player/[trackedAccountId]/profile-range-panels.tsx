@@ -57,6 +57,7 @@ export function PlayerProfileRangeStatsCareer() {
   const {
     rangeKey,
     legendAggregates,
+    mapAggregates,
     careerDeltas,
     rangeLoading,
     timelinePoints,
@@ -87,6 +88,15 @@ export function PlayerProfileRangeStatsCareer() {
       : null;
   const bestLegendIconUrl = bestLegend ? getLegendIconUrl(bestLegend.legend) : null;
 
+  const bestMap =
+    mapAggregates.length > 0
+      ? [...mapAggregates].sort((a, b) => {
+          if (b.totalRpDelta !== a.totalRpDelta) return b.totalRpDelta - a.totalRpDelta;
+          if (b.games !== a.games) return b.games - a.games;
+          return b.avgRpDelta - a.avgRpDelta;
+        })[0]
+      : null;
+
   const totalGames = legendAggregates.reduce((s, r) => s + r.games, 0);
 
   const hasLegacyNumbers =
@@ -110,14 +120,32 @@ export function PlayerProfileRangeStatsCareer() {
         <Card className="border-emerald-500/20 bg-emerald-500/5">
           <CardHeader className="space-y-1 p-2.5">
             <CardDescription className="text-[11px] leading-none">Games ({rangeKey})</CardDescription>
-            <CardTitle className="text-lg font-semibold tabular-nums leading-tight">{totalGames}</CardTitle>
+            <CardTitle className="flex flex-col items-start gap-0.5 text-lg font-semibold leading-tight">
+              <span className="tabular-nums">{totalGames}</span>
+              <span className="text-muted-foreground flex w-full items-center justify-between gap-1.5 text-xs font-normal tabular-nums">
+                <span>Net RP</span>
+                <RpDeltaBadge delta={netRpDelta} />
+              </span>
+            </CardTitle>
           </CardHeader>
         </Card>
         <Card className="border-cyan-500/20 bg-cyan-500/5">
           <CardHeader className="space-y-1 p-2.5">
-            <CardDescription className="text-[11px] leading-none">Net RP ({rangeKey})</CardDescription>
-            <CardTitle className="text-lg font-semibold leading-tight">
-              <RpDeltaBadge delta={netRpDelta} />
+            <CardDescription className="text-[11px] leading-none">Best map ({rangeKey})</CardDescription>
+            <CardTitle className="flex flex-col items-start gap-0.5 text-lg font-semibold leading-tight">
+              {bestMap ? (
+                <>
+                  <span className="min-w-0 truncate">{bestMap.mapName}</span>
+                  <span className="text-muted-foreground flex w-full items-center justify-between gap-1.5 text-xs font-normal tabular-nums">
+                    <span>
+                      {bestMap.games} game{bestMap.games !== 1 ? "s" : ""}
+                    </span>
+                    <RpDeltaBadge delta={bestMap.totalRpDelta} />
+                  </span>
+                </>
+              ) : (
+                "—"
+              )}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -164,8 +192,11 @@ export function PlayerProfileRangeStatsCareer() {
                     ) : null}
                     <span className="truncate">{mostPlayedLegend.legend}</span>
                   </span>
-                  <span className="text-muted-foreground text-xs font-normal tabular-nums">
-                    {mostPlayedLegend.games} game{mostPlayedLegend.games !== 1 ? "s" : ""}
+                  <span className="text-muted-foreground flex items-center gap-1.5 justify-between w-full text-xs font-normal tabular-nums">
+                    <span>
+                      {mostPlayedLegend.games} game{mostPlayedLegend.games !== 1 ? "s" : ""}
+                    </span>
+                    <RpDeltaBadge delta={mostPlayedLegend.totalRpDelta} />
                   </span>
                 </>
               ) : (
@@ -208,25 +239,41 @@ export function PlayerProfileRangeStatsCareer() {
           </CardHeader>
           <CardContent className="space-y-4">
             {trackerRows.length > 0 ? (
-              <div className="divide-y divide-border/50 rounded-md border border-border/40">
-                {trackerRows.map((row) => (
-                  <div
-                    key={`${row.trackerKey}-${row.dataIndex}`}
-                    className="flex flex-wrap items-start justify-between gap-3 px-3 py-2.5 last:pb-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium leading-tight">{row.displayName}</p>
-                      <p className="text-muted-foreground font-mono text-[10px]">{row.trackerKey}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold tabular-nums">{row.value.toLocaleString()}</p>
-                      <div className="mt-0.5 flex justify-end">
-                        <span className="text-muted-foreground text-[10px]">Δ {rangeKey}</span>:{" "}
-                        <RpDeltaBadge delta={row.delta} />
+              <div className="space-y-4">
+                {Array.from({ length: Math.ceil(trackerRows.length / 3) }, (_, chunkIdx) => {
+                  const start = chunkIdx * 3;
+                  const chunk = trackerRows.slice(start, start + 3);
+                  return (
+                    <div
+                      key={start}
+                      className={chunkIdx > 0 ? "border-border/60 border-t pt-4" : undefined}
+                    >
+                      <div className="grid grid-cols-3 divide-x divide-border/60">
+                        {chunk.map((row, i) => {
+                          const colPad =
+                            i === 0
+                              ? "min-w-0 pr-3 sm:pr-6"
+                              : i === 1
+                                ? "min-w-0 px-3 sm:px-6"
+                                : "min-w-0 pl-3 sm:pl-6";
+                          return (
+                            <div key={`${row.trackerKey}-${row.dataIndex}`} className={colPad}>
+                              <p className="text-muted-foreground text-[11px] tracking-wide">
+                                {row.displayName}
+                              </p>
+                              <p className="mt-0.5 truncate text-lg font-semibold tracking-tight tabular-nums sm:text-xl">
+                                {row.value.toLocaleString()}
+                              </p>
+                              <div className="mt-1">
+                                <RpDeltaBadge delta={row.delta} />
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="text-muted-foreground text-sm">

@@ -18,7 +18,8 @@
     "ensure:play-session-rank-cols": "tsx src/scripts/ensurePlaySessionRankColumns.ts",
     "backfill:session-ranks": "tsx src/scripts/backfillPlaySessionRanksFromSnapshots.ts",
     "fix:names": "tsx src/scripts/fixTrackedAccountNames.ts",
-    "check:link-candidates": "tsx src/scripts/checkLinkCandidates.ts"
+    "check:link-candidates": "tsx src/scripts/checkLinkCandidates.ts",
+    "digest:party": "tsx src/scripts/partyDebugDigest.ts"
   },
   "dependencies": {
     "@apex-assistant/core": "0.1.0",

@@ -10,6 +10,9 @@ import {
   hasAnyTrackerObservations,
 } from "@apex-assistant/db";
 import { buildTrackerRowsForProfile } from "@/lib/tracker-profile-rows";
+import { getLegendIconUrl } from "@/lib/legend-icon-url";
+import { resolveProfileDisplayLegendName } from "@/lib/profile-display-legend";
+import { evaluateRealtimePresence } from "@/lib/realtime-presence";
 import { NextResponse } from "next/server";
 import { toApiError } from "@/app/api/_lib/responses";
 
@@ -47,7 +50,16 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
 
-    const selectedLegend = account.realtimeSelectedLegend ?? null;
+    const lastSeenLegendIconUrl = account.realtimeSelectedLegend
+      ? getLegendIconUrl(account.realtimeSelectedLegend)
+      : null;
+    const presenceEval = evaluateRealtimePresence({
+      realtimeUpdatedAt: account.realtimeUpdatedAt ? toIso(account.realtimeUpdatedAt) : null,
+      realtimeIsOnline: account.realtimeIsOnline,
+      realtimeIsInGame: account.realtimeIsInGame,
+      realtimeCurrentState: account.realtimeCurrentState,
+      realtimeCurrentStateAsText: account.realtimeCurrentStateAsText,
+    });
 
     const [
       timelineRaw,
@@ -55,7 +67,6 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
       mapAggregates,
       mapLegendAggregates,
       careerDeltas,
-      trackerSnapshot,
       trackerDeltas,
       hasTrackerObservations,
     ] = await Promise.all([
@@ -64,12 +75,20 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
       getMapAggregatesByAccount(id, hours),
       getMapLegendAggregatesByAccount(id, hours),
       getCareerStatDeltasForTrackedAccount(id, hours),
-      getLatestTrackerSnapshotForLegend(id, selectedLegend ?? ""),
       getTrackerStatDeltasForTrackedAccount(id, hours),
       hasAnyTrackerObservations(id),
     ]);
 
-    const trackerRows = buildTrackerRowsForProfile(trackerSnapshot, trackerDeltas, selectedLegend);
+    const displayLegend = resolveProfileDisplayLegendName({
+      isOnline: presenceEval.shouldShow,
+      lastSeenLegendIconUrl,
+      realtimeSelectedLegend: account.realtimeSelectedLegend,
+      legendAggregates,
+    });
+
+    const trackerSnapshot = await getLatestTrackerSnapshotForLegend(id, displayLegend ?? "");
+
+    const trackerRows = buildTrackerRowsForProfile(trackerSnapshot, trackerDeltas, displayLegend);
 
     return NextResponse.json({
       rangeKey,
@@ -82,7 +101,7 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
       mapLegendAggregates,
       careerDeltas,
       trackerRows,
-      selectedLegend,
+      selectedLegend: displayLegend,
       hasTrackerObservations,
       legacyApiSummary: {
         kills: account.careerKills,

@@ -28,7 +28,7 @@ export type TProfileRangePayload = {
   };
   /** Per–(legend, key) tracker rows for the selected legend (latest snapshot + range deltas). */
   trackerRows: TTrackerRowUi[];
-  /** Realtime-selected legend name from last sync (for labeling). */
+  /** Legend matching the profile hero + equipped trackers (realtime vs most-played in range). */
   selectedLegend: string | null;
   /** Whether we have any tracker_observations rows for this account (sync has run with new ingestion). */
   hasTrackerObservations: boolean;
