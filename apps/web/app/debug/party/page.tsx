@@ -2,8 +2,6 @@ import {
   getRecentVoiceIntervals,
   getRecentPartyEdges,
   listTrackedAccounts,
-  getStackMatesForAccount,
-  getBaselineAvgRp,
 } from "@apex-assistant/db";
 import {
   Card,
@@ -73,13 +71,55 @@ export default async function DebugPartyPage() {
     }
   }
 
-  const firstAccount = accounts[0] ?? null;
-  const [stackMates, baseline] = firstAccount
-    ? await Promise.all([
-        getStackMatesForAccount(firstAccount.id, 720),
-        getBaselineAvgRp(firstAccount.id, 720),
-      ])
-    : [[], null];
+  const globalPairs = (() => {
+    const map = new Map<
+      string,
+      {
+        playerA: string;
+        playerB: string;
+        games: number;
+        totalRpA: number;
+        totalRpB: number;
+        scoreSum: number;
+        scoreCount: number;
+        lastPlayedAt: Date;
+      }
+    >();
+    for (const edge of partyEdges) {
+      const a = edge.ignA;
+      const b = edge.ignB;
+      const [left, right] = a <= b ? [a, b] : [b, a];
+      const key = `${left}\0${right}`;
+      const current = map.get(key) ?? {
+        playerA: left,
+        playerB: right,
+        games: 0,
+        totalRpA: 0,
+        totalRpB: 0,
+        scoreSum: 0,
+        scoreCount: 0,
+        lastPlayedAt: edge.createdAt,
+      };
+      current.games += 1;
+      current.totalRpA += edge.rpDeltaA ?? 0;
+      current.totalRpB += edge.rpDeltaB ?? 0;
+      current.scoreSum += edge.score;
+      current.scoreCount += 1;
+      if (new Date(edge.createdAt).getTime() > new Date(current.lastPlayedAt).getTime()) {
+        current.lastPlayedAt = edge.createdAt;
+      }
+      map.set(key, current);
+    }
+    return [...map.values()]
+      .map((row) => ({
+        ...row,
+        avgScore: row.scoreCount > 0 ? row.scoreSum / row.scoreCount : 0,
+      }))
+      .sort((a, b) => {
+        if (b.games !== a.games) return b.games - a.games;
+        return b.avgScore - a.avgScore;
+      });
+  })();
 
   return (
     <main className="mx-auto w-full max-w-7xl space-y-8 p-6">
@@ -232,15 +272,13 @@ export default async function DebugPartyPage() {
       {/* Stack Mates Preview */}
       <Card className="border-border/60">
         <CardHeader>
-          <CardTitle>Stack Mates Preview</CardTitle>
+          <CardTitle>Global Stack Pairs</CardTitle>
           <CardDescription>
-            {firstAccount
-              ? `Aggregated teammates for ${firstAccount.ign} (30d window). Baseline avg RP: ${baseline ? baseline.avgRpDelta.toFixed(1) : "—"} over ${baseline?.games ?? 0} games.`
-              : "No tracked accounts found."}
+            Aggregated pairings from scored party edges across all tracked accounts.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {stackMates.length === 0 ? (
+          {globalPairs.length === 0 ? (
             <p className="text-muted-foreground text-sm">
               No stack-mate data yet. Edges build up after the correlation job matches segment pairs.
             </p>
@@ -249,41 +287,34 @@ export default async function DebugPartyPage() {
               <table className="w-full min-w-[700px] text-left text-xs">
                 <thead>
                   <tr className="text-muted-foreground border-b">
-                    <th className="px-2 py-1 font-medium">Teammate</th>
-                    <th className="px-2 py-1 font-medium">Platform</th>
+                    <th className="px-2 py-1 font-medium">Player A</th>
+                    <th className="px-2 py-1 font-medium">Player B</th>
                     <th className="px-2 py-1 font-medium text-right">Games</th>
-                    <th className="px-2 py-1 font-medium text-right">Avg RP</th>
-                    <th className="px-2 py-1 font-medium text-right">vs Baseline</th>
-                    <th className="px-2 py-1 font-medium text-right">Total RP</th>
+                    <th className="px-2 py-1 font-medium text-right">Total RP A</th>
+                    <th className="px-2 py-1 font-medium text-right">Total RP B</th>
                     <th className="px-2 py-1 font-medium text-right">Avg Score</th>
                     <th className="px-2 py-1 font-medium">Confidence</th>
                     <th className="px-2 py-1 font-medium">Last Played</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {stackMates.map((m) => {
-                    const vsBaseline = baseline
-                      ? Math.round((m.avgRpDelta - baseline.avgRpDelta) * 10) / 10
-                      : null;
+                  {globalPairs.map((pair) => {
                     return (
-                      <tr key={m.teammateAccountId} className="border-border/40 border-b last:border-0">
-                        <td className="px-2 py-1 font-medium">{m.teammateIgn}</td>
-                        <td className="px-2 py-1 uppercase">{m.teammatePlatform}</td>
-                        <td className="px-2 py-1 text-right tabular-nums">{m.games}</td>
-                        <td className={`px-2 py-1 text-right tabular-nums ${rpColor(m.avgRpDelta)}`}>
-                          {m.avgRpDelta > 0 ? "+" : ""}{m.avgRpDelta.toFixed(1)}
+                      <tr key={`${pair.playerA}\0${pair.playerB}`} className="border-border/40 border-b last:border-0">
+                        <td className="px-2 py-1 font-medium">{pair.playerA}</td>
+                        <td className="px-2 py-1 font-medium">{pair.playerB}</td>
+                        <td className="px-2 py-1 text-right tabular-nums">{pair.games}</td>
+                        <td className={`px-2 py-1 text-right tabular-nums ${rpColor(pair.totalRpA)}`}>
+                          {pair.totalRpA > 0 ? "+" : ""}{pair.totalRpA}
                         </td>
-                        <td className={`px-2 py-1 text-right tabular-nums ${rpColor(vsBaseline)}`}>
-                          {vsBaseline != null ? `${vsBaseline > 0 ? "+" : ""}${vsBaseline.toFixed(1)}` : "—"}
+                        <td className={`px-2 py-1 text-right tabular-nums ${rpColor(pair.totalRpB)}`}>
+                          {pair.totalRpB > 0 ? "+" : ""}{pair.totalRpB}
                         </td>
-                        <td className={`px-2 py-1 text-right tabular-nums ${rpColor(m.totalRpDelta)}`}>
-                          {m.totalRpDelta > 0 ? "+" : ""}{m.totalRpDelta}
+                        <td className={`px-2 py-1 text-right tabular-nums ${scoreColor(pair.avgScore)}`}>
+                          {pair.avgScore.toFixed(2)}
                         </td>
-                        <td className={`px-2 py-1 text-right tabular-nums ${scoreColor(m.avgScore)}`}>
-                          {m.avgScore.toFixed(2)}
-                        </td>
-                        <td className="px-2 py-1">{confidenceTier(m.avgScore)}</td>
-                        <td className="px-2 py-1">{fmtDateTime(m.lastPlayedAt)}</td>
+                        <td className="px-2 py-1">{confidenceTier(pair.avgScore)}</td>
+                        <td className="px-2 py-1">{fmtDateTime(pair.lastPlayedAt)}</td>
                       </tr>
                     );
                   })}
