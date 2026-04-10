@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { PendingLink } from "@/components/pending-link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Card,
@@ -256,12 +256,12 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
                           <div className="min-w-0 flex-1">
                             <div onClick={(e) => e.stopPropagation()}>
                               {row.trackedAccountId ? (
-                                <Link
+                                <PendingLink
                                   href={`/player/${row.trackedAccountId}`}
                                   className="font-medium hover:underline"
                                 >
                                   {row.ign}
-                                </Link>
+                                </PendingLink>
                               ) : (
                                 <div className="font-medium">{row.ign}</div>
                               )}

@@ -6,3 +6,5 @@ export * from "./repositories/usersRepo.js";
 export * from "./repositories/playSessionsRepo.js";
 export * from "./repositories/presenceSnapshotsRepo.js";
 export * from "./repositories/gameSegmentsRepo.js";
+export * from "./repositories/voiceIntervalsRepo.js";
+export * from "./repositories/partyEdgesRepo.js";

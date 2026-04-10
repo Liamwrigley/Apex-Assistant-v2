@@ -1,6 +1,9 @@
 import { type TPlayerStatSnapshot, type TRankSnapshot } from "@apex-assistant/core";
 import { pool } from "../client.js";
 
+/** Upper bound for rank-timeline lookback (hours). Aligns with profile range picker (e.g. 30d) and career deltas. */
+export const RANK_TIMELINE_MAX_HOURS = 8760;
+
 type TSnapshotInsert = {
   trackedAccountId: string;
   rankScore: number;
@@ -222,7 +225,9 @@ export async function getRankTimelineByTrackedAccountId(
   trackedAccountId: string,
   hours = 24
 ): Promise<Array<{ capturedAt: Date; rankScore: number }>> {
-  const clampedHours = Number.isFinite(hours) ? Math.min(Math.max(Math.trunc(hours), 1), 168) : 24;
+  const clampedHours = Number.isFinite(hours)
+    ? Math.min(Math.max(Math.trunc(hours), 1), RANK_TIMELINE_MAX_HOURS)
+    : 24;
   const result = await pool.query<{ capturedAt: Date; rankScore: number }>(
     `
     select
@@ -272,7 +277,9 @@ export async function getRankTimelinesByTrackedAccountIds(
     return {};
   }
 
-  const clampedHours = Number.isFinite(hours) ? Math.min(Math.max(Math.trunc(hours), 1), 168) : 168;
+  const clampedHours = Number.isFinite(hours)
+    ? Math.min(Math.max(Math.trunc(hours), 1), RANK_TIMELINE_MAX_HOURS)
+    : 168;
   const result = await pool.query<{ trackedAccountId: string; capturedAt: Date; rankScore: number }>(
     `
     with filtered as (
@@ -384,7 +391,7 @@ export async function getCareerStatDeltasForTrackedAccount(
   deltaWins: number | null;
 }> {
   const clampedHours = Number.isFinite(hours)
-    ? Math.min(Math.max(Math.trunc(hours), 1), 8760)
+    ? Math.min(Math.max(Math.trunc(hours), 1), RANK_TIMELINE_MAX_HOURS)
     : 24;
 
   const result = await pool.query<{

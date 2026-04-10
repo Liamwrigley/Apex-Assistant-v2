@@ -204,3 +204,46 @@ create index if not exists idx_inferred_game_segments_account
 create unique index if not exists uq_inferred_game_segments_one_open_per_account
   on inferred_game_segments (tracked_account_id)
   where ended_at is null;
+
+-- Discord voice interval tracking (metadata only — no audio).
+create table if not exists discord_voice_intervals (
+  id uuid primary key default gen_random_uuid(),
+  guild_id text not null,
+  discord_user_id text not null,
+  channel_id text not null,
+  joined_at timestamptz not null default now(),
+  left_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_voice_intervals_guild_user_joined
+  on discord_voice_intervals (guild_id, discord_user_id, joined_at desc);
+
+create index if not exists idx_voice_intervals_guild_channel_time
+  on discord_voice_intervals (guild_id, channel_id, joined_at, left_at);
+
+create unique index if not exists uq_voice_intervals_one_open_per_user_guild
+  on discord_voice_intervals (guild_id, discord_user_id)
+  where left_at is null;
+
+-- Party detection: scored edges between segment pairs hypothesised as same squad.
+create table if not exists party_segment_edges (
+  id uuid primary key default gen_random_uuid(),
+  guild_id text not null,
+  segment_id_a uuid not null references inferred_game_segments(id) on delete cascade,
+  segment_id_b uuid not null references inferred_game_segments(id) on delete cascade,
+  tracked_account_id_a uuid not null references tracked_accounts(id) on delete cascade,
+  tracked_account_id_b uuid not null references tracked_accounts(id) on delete cascade,
+  score real not null default 0,
+  evidence jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists uq_party_segment_edges_pair
+  on party_segment_edges (segment_id_a, segment_id_b);
+
+create index if not exists idx_party_segment_edges_account_a
+  on party_segment_edges (tracked_account_id_a, created_at desc);
+
+create index if not exists idx_party_segment_edges_account_b
+  on party_segment_edges (tracked_account_id_b, created_at desc);

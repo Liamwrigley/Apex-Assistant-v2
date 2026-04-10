@@ -13,6 +13,8 @@ import {
   pool,
   searchTrackedAccountsByOwner,
   upsertUser,
+  openVoiceInterval,
+  closeVoiceInterval,
 } from "@apex-assistant/db";
 import {
   ActionRowBuilder,
@@ -474,7 +476,15 @@ async function handleTrackRemoveAutocomplete(
   );
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const voiceTrackingEnabled =
+  (process.env.DISCORD_VOICE_TRACKING_ENABLED ?? "true").toLowerCase() !== "false";
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    ...(voiceTrackingEnabled ? [GatewayIntentBits.GuildVoiceStates] : []),
+  ],
+});
 
 function isUnknownInteractionError(error: unknown): boolean {
   return error instanceof DiscordAPIError && error.code === 10062;
@@ -552,6 +562,33 @@ client.once("ready", () => {
     console.error("[discord] Slash command sync failed", error);
   });
 });
+
+if (voiceTrackingEnabled) {
+  client.on("voiceStateUpdate", (oldState, newState) => {
+    const gId = newState.guild.id;
+    const userId = newState.id;
+    const oldChannel = oldState.channelId;
+    const newChannel = newState.channelId;
+
+    if (oldChannel === newChannel) return;
+
+    void (async () => {
+      try {
+        if (oldChannel && !newChannel) {
+          await closeVoiceInterval(gId, userId);
+        } else if (!oldChannel && newChannel) {
+          await openVoiceInterval({ guildId: gId, discordUserId: userId, channelId: newChannel });
+        } else if (oldChannel && newChannel) {
+          await closeVoiceInterval(gId, userId);
+          await openVoiceInterval({ guildId: gId, discordUserId: userId, channelId: newChannel });
+        }
+      } catch (error) {
+        console.error("[discord] Voice interval tracking error:", error);
+      }
+    })();
+  });
+  console.log("[discord] Voice state tracking enabled.");
+}
 
 client.on("guildCreate", (guild) => {
   if (guildId?.trim()) {

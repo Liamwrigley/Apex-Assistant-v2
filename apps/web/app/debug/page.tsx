@@ -22,6 +22,12 @@ const debugPages = [
     description:
       "View and manage identity group links across tracked accounts. Requires ADMIN_UI_KEY.",
   },
+  {
+    href: "/debug/party",
+    title: "Party Detection",
+    description:
+      "Voice intervals, scored segment-pair edges, and stack-mate aggregates. For tuning the party correlation heuristic.",
+  },
 ];
 
 export default function DebugIndexPage() {

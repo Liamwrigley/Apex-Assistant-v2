@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
+import { PendingLink } from "@/components/pending-link";
 import {
   getTrackedAccountById,
   getRankTimelineByTrackedAccountId,
@@ -247,7 +247,9 @@ export default async function PlayerProfilePage(props: {
       {/* Breadcrumb + range picker */}
       <div className="flex items-center justify-between gap-4">
         <nav className="text-muted-foreground text-sm">
-          <Link href="/" className="hover:text-foreground transition-colors">Dashboard</Link>
+          <PendingLink href="/" className="hover:text-foreground transition-colors">
+            Dashboard
+          </PendingLink>
           <span className="mx-1.5">/</span>
           <span className="text-foreground font-medium">{account.ign}</span>
         </nav>

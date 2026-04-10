@@ -60,7 +60,17 @@ export function PlayerProfileHeroImage(props: {
 }
 
 export function PlayerProfileRangeStatsCareer(props: { account: TAccountCareer }) {
-  const { rangeKey, legendAggregates, careerDeltas, rangeLoading } = useProfileRange();
+  const { rangeKey, legendAggregates, careerDeltas, rangeLoading, timelinePoints } =
+    useProfileRange();
+
+  /** Matches the RP sparkline: last snapshot minus first in this range (rank_snapshots), not inferred segment sums. */
+  const netRpDelta = useMemo(() => {
+    if (timelinePoints.length < 2) return null;
+    const first = timelinePoints[0]!.rankScore;
+    const last = timelinePoints[timelinePoints.length - 1]!.rankScore;
+    const d = last - first;
+    return Number.isFinite(d) ? d : null;
+  }, [timelinePoints]);
 
   const mostPlayedLegend = legendAggregates.length > 0 ? legendAggregates[0] : null;
   const mostPlayedLegendIconUrl = mostPlayedLegend ? getLegendIconUrl(mostPlayedLegend.legend) : null;
@@ -75,7 +85,6 @@ export function PlayerProfileRangeStatsCareer(props: { account: TAccountCareer }
   const bestLegendIconUrl = bestLegend ? getLegendIconUrl(bestLegend.legend) : null;
 
   const totalGames = legendAggregates.reduce((s, r) => s + r.games, 0);
-  const totalRpDelta = legendAggregates.reduce((s, r) => s + r.totalRpDelta, 0);
 
   const showCareer =
     props.account.careerKills !== null ||
@@ -98,7 +107,7 @@ export function PlayerProfileRangeStatsCareer(props: { account: TAccountCareer }
           <CardHeader className="space-y-1 p-2.5">
             <CardDescription className="text-[11px] leading-none">Net RP ({rangeKey})</CardDescription>
             <CardTitle className="text-lg font-semibold leading-tight">
-              <RpDeltaBadge delta={totalGames > 0 ? totalRpDelta : null} />
+              <RpDeltaBadge delta={netRpDelta} />
             </CardTitle>
           </CardHeader>
         </Card>
@@ -309,7 +318,7 @@ function MapPerformanceCard(props: { rangeLoading: boolean }) {
   const { rangeKey, mapAggregates, mapLegendAggregates } = useProfileRange();
   const [sortField, setSortField] = useState<TMapSortField>("totalRpDelta");
   const [sortAsc, setSortAsc] = useState(false);
-  const [expandedMap, setExpandedMap] = useState<string | null>(null);
+  const [expandedMaps, setExpandedMaps] = useState<Set<string>>(() => new Set());
 
   const handleSort = useCallback((field: TMapSortField) => {
     setSortField((prev) => {
@@ -349,7 +358,9 @@ function MapPerformanceCard(props: { rangeLoading: boolean }) {
     <Card className={props.rangeLoading ? "opacity-70 transition-opacity" : ""}>
       <CardHeader>
         <CardTitle>Map Performance</CardTitle>
-        <CardDescription>RP breakdown by ranked map ({rangeKey}). Click a map to see per-legend stats.</CardDescription>
+        <CardDescription>
+          RP breakdown by ranked map ({rangeKey}). Click maps to show per-legend stats — multiple maps can be open at once.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {mapAggregates.length === 0 ? (
@@ -382,7 +393,7 @@ function MapPerformanceCard(props: { rangeLoading: boolean }) {
               </thead>
               <tbody>
                 {sortedMaps.map((row) => {
-                  const isExpanded = expandedMap === row.mapName;
+                  const isExpanded = expandedMaps.has(row.mapName);
                   const legends = legendsByMap.get(row.mapName) ?? [];
                   return (
                     <MapRow
@@ -394,7 +405,15 @@ function MapPerformanceCard(props: { rangeLoading: boolean }) {
                       isExpanded={isExpanded}
                       legends={legends}
                       onToggle={() =>
-                        setExpandedMap((prev) => (prev === row.mapName ? null : row.mapName))
+                        setExpandedMaps((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(row.mapName)) {
+                            next.delete(row.mapName);
+                          } else {
+                            next.add(row.mapName);
+                          }
+                          return next;
+                        })
                       }
                     />
                   );

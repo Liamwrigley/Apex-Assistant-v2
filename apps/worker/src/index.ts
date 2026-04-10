@@ -5,6 +5,7 @@ import express from "express";
 import { AppError } from "@apex-assistant/core";
 import { getIngestionQueueStats } from "@apex-assistant/db";
 import { ingestGuild, getProviderHealth, ingestNextDueTrackedAccount } from "./services/ingestionService.js";
+import { correlateRecentSegments } from "./services/partyCorrelationService.js";
 
 dotenv.config({ path: resolve(process.cwd(), "../../.env") });
 
@@ -110,3 +111,23 @@ const runWorkerLoop = async (loopIndex: number) => {
 for (let i = 0; i < concurrency; i += 1) {
   void runWorkerLoop(i);
 }
+
+const partyCorrelationIntervalMs = Number(process.env.PARTY_CORRELATION_INTERVAL_MS ?? 5 * 60 * 1000);
+const partyCorrelationWindowMs = Number(process.env.PARTY_CORRELATION_WINDOW_MS ?? 30 * 60 * 1000);
+
+const runPartyCorrelationLoop = async () => {
+  workerLog("party correlation loop start", { intervalMs: partyCorrelationIntervalMs });
+  while (true) {
+    try {
+      const result = await correlateRecentSegments(partyCorrelationWindowMs);
+      if (result.edgesCreated > 0) {
+        workerLog("party correlation tick", { edgesCreated: result.edgesCreated });
+      }
+    } catch (error) {
+      console.error("Party correlation loop error:", error);
+    }
+    await sleep(partyCorrelationIntervalMs);
+  }
+};
+
+void runPartyCorrelationLoop();

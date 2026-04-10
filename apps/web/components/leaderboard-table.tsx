@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
+import { PendingLink } from "@/components/pending-link";
 import { PlayerTimelineSparkline } from "@/components/player-timeline-sparkline";
 import { RpDeltaBadge } from "@/components/rp-delta-badge";
 
@@ -155,13 +155,13 @@ export function LeaderboardTable(props: {
               <td className="px-2 py-2 align-middle">{index + 1}</td>
               <td className="px-2 py-2 align-middle">
                 <div className="flex min-w-0 flex-col gap-1 leading-tight">
-                  <Link
+                  <PendingLink
                     href={`/player/${row.trackedAccountId}`}
                     className="truncate font-medium hover:underline"
                     title={row.ign}
                   >
                     {row.ign}
-                  </Link>
+                  </PendingLink>
                   <span
                     className="inline-flex w-fit items-center rounded border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] uppercase text-cyan-300"
                     title={row.platform}
