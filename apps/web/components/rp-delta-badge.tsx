@@ -38,7 +38,7 @@ export function RpDeltaBadge(props: {
           ? "bg-emerald-500/15 text-emerald-300"
           : d < 0
             ? "bg-rose-500/15 text-rose-300"
-            : "text-muted-foreground",
+            : "bg-muted/50 text-muted-foreground",
         props.className
       )}
     >
@@ -50,6 +50,11 @@ export function RpDeltaBadge(props: {
       {d < 0 ? (
         <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className="h-3.5 w-3.5 shrink-0">
           <path d="M10 17l-5-6h3V3h4v8h3l-5 6z" />
+        </svg>
+      ) : null}
+      {d === 0 ? (
+        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden className="h-3.5 w-3.5 shrink-0">
+          <path d="M4 9h12v2H4z" />
         </svg>
       ) : null}
       <span>

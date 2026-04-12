@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { usePathname } from "next/navigation";
-import type { TLegendAggregate, TMapAggregate, TMapLegendAggregate } from "@apex-assistant/db";
+import type { TLegendAggregate, TMapAggregate, TMapLegendAggregate, TStackComposition, TBestStackByMap } from "@apex-assistant/db";
 import type { TTrackerRowUi } from "@/lib/tracker-profile-rows";
 
 export type TProfileRangePayload = {
@@ -38,6 +38,9 @@ export type TProfileRangePayload = {
     damage: number | null;
     wins: number | null;
   } | null;
+  stackCompositions: TStackComposition[];
+  baselineAvgRp: { games: number; avgRpDelta: number } | null;
+  bestStackByMap: TBestStackByMap[];
 };
 
 type TContextValue = TProfileRangePayload & {

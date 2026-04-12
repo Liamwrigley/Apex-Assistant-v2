@@ -230,6 +230,28 @@ export async function getSegmentsBySessionIds(
   return grouped;
 }
 
+/**
+ * For each tracked account that has an open (in-progress) game segment,
+ * return the segment start time. Used to show "In game · Xm Ys" on live cards.
+ */
+export async function getOpenSegmentStartTimes(
+  trackedAccountIds: string[]
+): Promise<Record<string, Date>> {
+  if (trackedAccountIds.length === 0) return {};
+  const result = await pool.query<{ trackedAccountId: string; startedAt: Date }>(
+    `select tracked_account_id as "trackedAccountId", started_at as "startedAt"
+     from inferred_game_segments
+     where tracked_account_id = any($1::uuid[])
+       and ended_at is null`,
+    [trackedAccountIds]
+  );
+  const map: Record<string, Date> = {};
+  for (const row of result.rows) {
+    map[row.trackedAccountId] = row.startedAt;
+  }
+  return map;
+}
+
 export async function getRecentSegmentsByAccount(
   trackedAccountId: string,
   limit = 50

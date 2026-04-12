@@ -735,6 +735,7 @@ export async function claimNextDueTrackedAccount(params: {
         and (ingest_claimed_until is null or ingest_claimed_until < now())
         and (
           last_checked_at is null
+          or priority_poll_requested_at > coalesce(last_checked_at, to_timestamp(0))
           or (
             case
               when coalesce(realtime_is_in_game, 0) = 1 or coalesce(realtime_is_online, 0) = 1
@@ -744,7 +745,10 @@ export async function claimNextDueTrackedAccount(params: {
           )
         )
         and ($3::text is null or guild_id = $3)
-      order by coalesce(last_checked_at, to_timestamp(0)) asc
+      order by
+        case when priority_poll_requested_at > coalesce(last_checked_at, to_timestamp(0))
+             then 0 else 1 end asc,
+        coalesce(last_checked_at, to_timestamp(0)) asc
       for update skip locked
       limit 1
     )
@@ -784,8 +788,8 @@ export async function getIngestionQueueStats(guildId?: string): Promise<{
   claimedCount: number;
 }> {
   const withGuildFilter = typeof guildId === "string" && guildId.length > 0;
-  const pollMinutes = Number(process.env.INGEST_POLL_MINUTES ?? 5);
-  const onlinePollSeconds = Number(process.env.INGEST_POLL_SECONDS_ONLINE ?? 30);
+  const pollMinutes = Number(process.env.INGEST_POLL_MINUTES ?? 1);
+  const onlinePollSeconds = Number(process.env.INGEST_POLL_SECONDS_ONLINE ?? 15);
   const result = await pool.query<{
     activeCount: string;
     dueCount: string;
@@ -847,4 +851,24 @@ export async function getIngestionQueueStats(guildId?: string): Promise<{
     dueOfflineCount: Number(result.rows[0]?.dueOfflineCount ?? 0),
     claimedCount: Number(result.rows[0]?.claimedCount ?? 0)
   };
+}
+
+/**
+ * Mark all active tracked accounts owned by a Discord user for immediate
+ * re-poll. The worker claim query prioritizes these accounts over the
+ * normal schedule, so the next poll cycle picks them up right away.
+ */
+export async function requestPriorityPoll(ownerUserId: string): Promise<number> {
+  const result = await pool.query(
+    `update tracked_accounts
+     set priority_poll_requested_at = now()
+     where owner_user_id = $1
+       and is_active = true
+       and (
+         priority_poll_requested_at is null
+         or priority_poll_requested_at <= coalesce(last_checked_at, to_timestamp(0))
+       )`,
+    [ownerUserId],
+  );
+  return result.rowCount ?? 0;
 }

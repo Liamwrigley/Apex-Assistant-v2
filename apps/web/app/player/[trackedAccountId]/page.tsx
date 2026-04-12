@@ -13,6 +13,9 @@ import {
   getLatestTrackerSnapshotForLegend,
   getTrackerStatDeltasForTrackedAccount,
   hasAnyTrackerObservations,
+  getStackCompositions,
+  getBaselineAvgRp,
+  getBestStackByMap,
 } from "@apex-assistant/db";
 import { buildTrackerRowsForProfile } from "@/lib/tracker-profile-rows";
 import {
@@ -46,6 +49,7 @@ import {
 } from "@/lib/realtime-presence";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { RecentSessionsSection } from "@/components/recent-sessions-section";
+import { StackMatesSection } from "./stack-mates-section";
 import {
   buildGranularSnapshotsByAccount,
   mapOpenSessionsToRecentSessionRows,
@@ -168,6 +172,9 @@ export default async function PlayerProfilePage(props: {
     careerDeltas,
     trackerDeltas,
     hasTrackerObservations,
+    stackCompositions,
+    baselineAvgRp,
+    bestStackByMap,
   ] = await Promise.all([
     getRankTimelineByTrackedAccountId(trackedAccountId, hours),
     getRecentCompletedSessionsByAccount(trackedAccountId, 30),
@@ -178,6 +185,9 @@ export default async function PlayerProfilePage(props: {
     getCareerStatDeltasForTrackedAccount(trackedAccountId, hours),
     getTrackerStatDeltasForTrackedAccount(trackedAccountId, hours),
     hasAnyTrackerObservations(trackedAccountId),
+    getStackCompositions(trackedAccountId, hours),
+    getBaselineAvgRp(trackedAccountId, hours),
+    getBestStackByMap(trackedAccountId, hours),
   ]);
 
   const displayLegend = resolveProfileDisplayLegendName({
@@ -214,6 +224,9 @@ export default async function PlayerProfilePage(props: {
       damage: account.careerDamage,
       wins: account.careerWins,
     },
+    stackCompositions,
+    baselineAvgRp,
+    bestStackByMap,
   };
 
   const openSession = openSessionSummaries[0] ?? null;
@@ -492,6 +505,8 @@ export default async function PlayerProfilePage(props: {
       </div>
 
       <PlayerProfileRangeTimelineTables trackedAccountId={trackedAccountId} />
+
+      <StackMatesSection playerIgn={account.ign} />
 
       <RecentSessionsSection
         rows={recentSessionRows}

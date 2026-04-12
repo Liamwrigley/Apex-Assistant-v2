@@ -15,6 +15,7 @@ import {
   upsertUser,
   openVoiceInterval,
   closeVoiceInterval,
+  requestPriorityPoll,
 } from "@apex-assistant/db";
 import {
   ActionRowBuilder,
@@ -578,6 +579,10 @@ if (voiceTrackingEnabled) {
           await closeVoiceInterval(gId, userId);
         } else if (!oldChannel && newChannel) {
           await openVoiceInterval({ guildId: gId, discordUserId: userId, channelId: newChannel });
+          const bumped = await requestPriorityPoll(userId);
+          if (bumped > 0) {
+            console.log(`[discord] Priority poll requested for ${bumped} account(s) (user ${userId} joined VC)`);
+          }
         } else if (oldChannel && newChannel) {
           await closeVoiceInterval(gId, userId);
           await openVoiceInterval({ guildId: gId, discordUserId: userId, channelId: newChannel });

@@ -8,6 +8,9 @@ import {
   getLatestTrackerSnapshotForLegend,
   getTrackerStatDeltasForTrackedAccount,
   hasAnyTrackerObservations,
+  getStackCompositions,
+  getBaselineAvgRp,
+  getBestStackByMap,
 } from "@apex-assistant/db";
 import { buildTrackerRowsForProfile } from "@/lib/tracker-profile-rows";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
@@ -69,6 +72,9 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
       careerDeltas,
       trackerDeltas,
       hasTrackerObservations,
+      stackCompositions,
+      baselineAvgRp,
+      bestStackByMap,
     ] = await Promise.all([
       getRankTimelineByTrackedAccountId(id, hours),
       getLegendAggregatesByAccount(id, hours),
@@ -77,6 +83,9 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
       getCareerStatDeltasForTrackedAccount(id, hours),
       getTrackerStatDeltasForTrackedAccount(id, hours),
       hasAnyTrackerObservations(id),
+      getStackCompositions(id, hours),
+      getBaselineAvgRp(id, hours),
+      getBestStackByMap(id, hours),
     ]);
 
     const displayLegend = resolveProfileDisplayLegendName({
@@ -108,6 +117,9 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
         damage: account.careerDamage,
         wins: account.careerWins,
       },
+      stackCompositions,
+      baselineAvgRp,
+      bestStackByMap,
     });
   } catch (error) {
     return toApiError(error);

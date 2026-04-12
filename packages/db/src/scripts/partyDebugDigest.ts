@@ -55,23 +55,10 @@ async function run(): Promise<void> {
   const edgeTotal = await pool.query<{ n: string }>(
     `select count(*)::text as n from party_segment_edges`,
   );
-  const edgeByGuild = await pool.query<{ guild_id: string; n: string }>(
-    `select guild_id, count(*)::text as n
-     from party_segment_edges
-     group by guild_id
-     order by count(*) desc`,
-  );
   console.log(`\nParty segment edges — total: ${edgeTotal.rows[0]?.n ?? "0"}`);
-  console.log("  By guild_id:");
-  for (const r of edgeByGuild.rows) {
-    console.log(`    ${r.guild_id}  →  ${r.n} rows`);
-  }
-  if (edgeByGuild.rows.length === 0) {
-    console.log("    (none)");
-  }
 
   const edgesRecent = await pool.query(
-    `select e.id, e.guild_id, e.score, e.created_at,
+    `select e.id, e.score, e.created_at,
             ta_a.ign as ign_a, ta_b.ign as ign_b,
             seg_a.legend_assumed as legend_a, seg_b.legend_assumed as legend_b,
             seg_a.rp_delta as rp_a, seg_b.rp_delta as rp_b,

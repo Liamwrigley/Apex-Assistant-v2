@@ -11,7 +11,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  getActivePartyGroups,
   getLeaderboardWithDelta24h,
+  getOpenSegmentStartTimes,
   getOpenSessionSummariesForTrackedAccountIds,
   getRankMovers24h,
   getRankTimelinesByTrackedAccountIds,
@@ -20,6 +22,8 @@ import {
   listTrackedAccounts,
 } from "@apex-assistant/db";
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
+import { getTeamIdentity } from "@/lib/team-name";
+import { cn } from "@/lib/utils";
 import {
   buildGranularSnapshotsByAccount,
   mapOpenSessionsToRecentSessionRows,
@@ -105,6 +109,7 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     highestGainer: TStatsMover | null;
     biggestLoser: TStatsMover | null;
   };
+  partyGroups: string[][];
   openSessionByTrackedId: Record<
     string,
     {
@@ -118,6 +123,7 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       latestRankDivision: string | null;
       latestRankIconUrl: string | null;
       legends: string[];
+      gameStartedAt: string | null;
     }
   >;
   recentSessions: TRecentSessionRow[];
@@ -177,10 +183,12 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
   const recentSessionAccountIds = [...new Set(recentSessionsRaw.map((r) => r.trackedAccountId))];
   const timelineAccountIds = [...new Set([...trackedIds, ...recentSessionAccountIds])];
 
-  const [openSessionSummaries, timelinesRaw, granularSnapshotsByAccount] = await Promise.all([
+  const [openSessionSummaries, timelinesRaw, granularSnapshotsByAccount, partyGroups, openSegmentStarts] = await Promise.all([
     getOpenSessionSummariesForTrackedAccountIds(allTrackedAccountIds),
     getRankTimelinesByTrackedAccountIds(timelineAccountIds, 168),
     buildGranularSnapshotsByAccount(recentSessionsRaw),
+    getActivePartyGroups(allTrackedAccountIds),
+    getOpenSegmentStartTimes(allTrackedAccountIds),
   ]);
 
   const timelines: Record<
@@ -207,9 +215,18 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       latestRankDivision: string | null;
       latestRankIconUrl: string | null;
       legends: string[];
+      gameStartedAt: string | null;
     }
   > = {};
+  const selectedLegendByAccountId = new Map(
+    trackedAccounts.map((a) => [a.id, a.realtimeSelectedLegend ?? null])
+  );
   for (const s of openSessionSummaries) {
+    const currentLegend = selectedLegendByAccountId.get(s.trackedAccountId);
+    const legends = currentLegend && !s.legends.includes(currentLegend)
+      ? [...s.legends, currentLegend]
+      : s.legends;
+    const segStart = openSegmentStarts[s.trackedAccountId];
     openSessionByTrackedId[s.trackedAccountId] = {
       startedAt: toIso(s.startedAt),
       openingRankScore: s.openingRankScore,
@@ -220,7 +237,8 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       latestRankName: s.latestRankName,
       latestRankDivision: s.latestRankDivision,
       latestRankIconUrl: s.latestRankIconUrl,
-      legends: s.legends,
+      legends,
+      gameStartedAt: segStart ? toIso(segStart) : null,
     };
   }
 
@@ -295,6 +313,7 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     tracked,
     timelines,
     stats24h: stats24hDisplay,
+    partyGroups,
     openSessionByTrackedId,
     recentSessions,
   };
@@ -313,6 +332,7 @@ export default async function HomePage() {
     tracked,
     timelines,
     stats24h,
+    partyGroups,
     openSessionByTrackedId,
     recentSessions,
   } = await loadDashboardFromDb(guildFilter);
@@ -371,6 +391,15 @@ export default async function HomePage() {
       seenPresenceGroups.add(key);
       return true;
     });
+
+  // Build grouped + solo presence lists
+  const liveIdSet = new Set(informativeRealtimeRows.map((r) => r.id));
+  const livePartyGroups = partyGroups
+    .map((group) => group.filter((id) => liveIdSet.has(id)))
+    .filter((group) => group.length >= 2);
+  const groupedIds = new Set(livePartyGroups.flat());
+  const soloRows = informativeRealtimeRows.filter((r) => !groupedIds.has(r.id));
+  const rowById = new Map(informativeRealtimeRows.map((r) => [r.id, r]));
   const averageRp =
     leaderboard.length === 0
       ? 0
@@ -529,21 +558,75 @@ export default async function HomePage() {
           <CardHeader>
             <CardTitle>Live Presence</CardTitle>
             <CardDescription>
-              Realtime activity and the current online session (RP and legends while
-              active).
+              Realtime activity and the current online session.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {informativeRealtimeRows.map((row) => (
-                <LivePresenceCard
-                  key={row.id}
-                  row={row}
-                  session={openSessionByTrackedId[row.id] ?? null}
-                  nowMs={nowMs}
-                />
-              ))}
-            </div>
+          <CardContent className="space-y-4">
+            {livePartyGroups.map((groupIds) => {
+              const team = getTeamIdentity(groupIds);
+              const members = groupIds
+                .map((id) => rowById.get(id))
+                .filter(Boolean) as TTrackedRow[];
+              return (
+                <div key={groupIds.join(",")} className="space-y-2">
+                  <div
+                    className={cn(
+                      "flex items-center gap-2 rounded-md px-3 py-1.5",
+                      team.color.bg,
+                      team.color.border,
+                      "border"
+                    )}
+                  >
+                    <span
+                      className={cn("h-2 w-2 rounded-full", team.color.dot)}
+                      aria-hidden
+                    />
+                    <span
+                      className={cn(
+                        "text-xs font-semibold tracking-wide uppercase",
+                        team.color.text
+                      )}
+                    >
+                      {team.name}
+                    </span>
+                    <span className="text-muted-foreground text-[10px]">
+                      {members.length} players
+                    </span>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {members.map((row) => (
+                      <LivePresenceCard
+                        key={row.id}
+                        row={row}
+                        session={openSessionByTrackedId[row.id] ?? null}
+                        nowMs={nowMs}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {soloRows.length > 0 ? (
+              <div className="space-y-2">
+                {livePartyGroups.length > 0 ? (
+                  <div className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/20 px-3 py-1.5">
+                    <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                      Solo
+                    </span>
+                  </div>
+                ) : null}
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {soloRows.map((row) => (
+                    <LivePresenceCard
+                      key={row.id}
+                      row={row}
+                      session={openSessionByTrackedId[row.id] ?? null}
+                      nowMs={nowMs}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

@@ -14,8 +14,8 @@ app.use(express.json());
 
 /** Railway / PaaS set PORT; local dev can use WORKER_API_PORT. */
 const port = Number(process.env.PORT ?? process.env.WORKER_API_PORT ?? 4100);
-const pollMinutes = Number(process.env.INGEST_POLL_MINUTES ?? 5);
-const onlinePollSeconds = Number(process.env.INGEST_POLL_SECONDS_ONLINE ?? 30);
+const pollMinutes = Number(process.env.INGEST_POLL_MINUTES ?? 1);
+const onlinePollSeconds = Number(process.env.INGEST_POLL_SECONDS_ONLINE ?? 15);
 /** When set, poller only processes that guild; when unset, all guilds (multi-server). */
 const defaultGuildId = process.env.DISCORD_GUILD_ID?.trim() || undefined;
 const debugLogs = (process.env.DEBUG_LOGS ?? "false").toLowerCase() === "true";

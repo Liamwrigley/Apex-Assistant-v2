@@ -46,6 +46,7 @@ alter table tracked_accounts add column if not exists realtime_current_state tex
 alter table tracked_accounts add column if not exists realtime_current_state_as_text text;
 alter table tracked_accounts add column if not exists realtime_current_state_since_timestamp bigint;
 alter table tracked_accounts add column if not exists realtime_updated_at timestamptz;
+alter table tracked_accounts add column if not exists priority_poll_requested_at timestamptz;
 create index if not exists idx_tracked_accounts_external_player_id on tracked_accounts (external_player_id);
 create index if not exists idx_tracked_accounts_identity_group_id on tracked_accounts (identity_group_id);
 create index if not exists idx_tracked_accounts_claim on tracked_accounts (is_active, ingest_claimed_until, last_checked_at);
@@ -222,14 +223,21 @@ create index if not exists idx_voice_intervals_guild_user_joined
 create index if not exists idx_voice_intervals_guild_channel_time
   on discord_voice_intervals (guild_id, channel_id, joined_at, left_at);
 
+create index if not exists idx_voice_intervals_user_joined
+  on discord_voice_intervals (discord_user_id, joined_at desc);
+
+create index if not exists idx_voice_intervals_channel_time
+  on discord_voice_intervals (channel_id, joined_at, left_at);
+
 create unique index if not exists uq_voice_intervals_one_open_per_user_guild
   on discord_voice_intervals (guild_id, discord_user_id)
   where left_at is null;
 
 -- Party detection: scored edges between segment pairs hypothesised as same squad.
+-- guild_id is legacy / nullable; correlation is guild-agnostic.
 create table if not exists party_segment_edges (
   id uuid primary key default gen_random_uuid(),
-  guild_id text not null,
+  guild_id text,
   segment_id_a uuid not null references inferred_game_segments(id) on delete cascade,
   segment_id_b uuid not null references inferred_game_segments(id) on delete cascade,
   tracked_account_id_a uuid not null references tracked_accounts(id) on delete cascade,
@@ -238,6 +246,8 @@ create table if not exists party_segment_edges (
   evidence jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+alter table party_segment_edges alter column guild_id drop not null;
 
 create unique index if not exists uq_party_segment_edges_pair
   on party_segment_edges (segment_id_a, segment_id_b);

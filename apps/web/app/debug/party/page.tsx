@@ -1,8 +1,10 @@
 import {
   getRecentVoiceIntervals,
   getRecentPartyEdges,
+  getPartyMatchEdges,
   listTrackedAccounts,
 } from "@apex-assistant/db";
+import type { TPartyMatchEdge } from "@apex-assistant/db";
 import {
   Card,
   CardContent,
@@ -57,12 +59,126 @@ function confidenceTier(score: number): string {
   return "Possible";
 }
 
+type TMatchPlayer = {
+  ign: string;
+  legend: string | null;
+  rpDelta: number | null;
+  rank: string | null;
+  segmentId: string;
+  segStart: Date;
+  segEnd: Date;
+  duration: number;
+};
+
+type TPartyMatch = {
+  time: Date;
+  map: string | null;
+  players: TMatchPlayer[];
+  avgScore: number;
+  edges: Array<{ ignA: string; ignB: string; score: number; evidence: Record<string, unknown> }>;
+};
+
+function clusterMatchesFromEdges(edges: TPartyMatchEdge[]): TPartyMatch[] {
+  // Union-find on segment IDs: edges that share a segment belong to the same match
+  const parent = new Map<string, string>();
+  function find(x: string): string {
+    if (!parent.has(x)) parent.set(x, x);
+    let root = parent.get(x)!;
+    while (root !== parent.get(root)!) root = parent.get(root)!;
+    let cur = x;
+    while (cur !== root) {
+      const next = parent.get(cur)!;
+      parent.set(cur, root);
+      cur = next;
+    }
+    return root;
+  }
+  function union(a: string, b: string) {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  }
+
+  for (const edge of edges) {
+    union(edge.segmentIdA, edge.segmentIdB);
+  }
+
+  // Group edges by match cluster
+  const clusterEdges = new Map<string, TPartyMatchEdge[]>();
+  for (const edge of edges) {
+    const root = find(edge.segmentIdA);
+    const group = clusterEdges.get(root) ?? [];
+    group.push(edge);
+    clusterEdges.set(root, group);
+  }
+
+  // Build match objects
+  const matches: TPartyMatch[] = [];
+  for (const group of clusterEdges.values()) {
+    const playerMap = new Map<string, TMatchPlayer>();
+    let mapName: string | null = null;
+
+    for (const edge of group) {
+      if (!playerMap.has(edge.segmentIdA)) {
+        playerMap.set(edge.segmentIdA, {
+          ign: edge.ignA,
+          legend: edge.legendA,
+          rpDelta: edge.rpDeltaA,
+          rank: edge.rankA,
+          segmentId: edge.segmentIdA,
+          segStart: edge.segStartA,
+          segEnd: edge.segEndA,
+          duration: edge.durationA,
+        });
+      }
+      if (!playerMap.has(edge.segmentIdB)) {
+        playerMap.set(edge.segmentIdB, {
+          ign: edge.ignB,
+          legend: edge.legendB,
+          rpDelta: edge.rpDeltaB,
+          rank: edge.rankB,
+          segmentId: edge.segmentIdB,
+          segStart: edge.segStartB,
+          segEnd: edge.segEndB,
+          duration: edge.durationB,
+        });
+      }
+      if (!mapName) mapName = edge.mapA ?? edge.mapB;
+    }
+
+    const players = [...playerMap.values()].sort((a, b) => a.ign.localeCompare(b.ign));
+    const totalScore = group.reduce((sum, e) => sum + e.score, 0);
+    const avgScore = group.length > 0 ? totalScore / group.length : 0;
+    const earliest = players.reduce(
+      (min, p) => (new Date(p.segStart).getTime() < new Date(min).getTime() ? p.segStart : min),
+      players[0].segStart,
+    );
+
+    matches.push({
+      time: earliest,
+      map: mapName,
+      players,
+      avgScore,
+      edges: group.map((e) => ({
+        ignA: e.ignA,
+        ignB: e.ignB,
+        score: e.score,
+        evidence: e.evidence as Record<string, unknown>,
+      })),
+    });
+  }
+
+  return matches.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+}
+
 export default async function DebugPartyPage() {
-  const [voiceIntervals, partyEdges, accounts] = await Promise.all([
+  const [voiceIntervals, partyEdges, matchEdges, accounts] = await Promise.all([
     getRecentVoiceIntervals(undefined, 200),
-    getRecentPartyEdges(undefined, 200),
+    getRecentPartyEdges(200),
+    getPartyMatchEdges(300),
     listTrackedAccounts(),
   ]);
+
+  const partyMatches = clusterMatchesFromEdges(matchEdges);
 
   const ownerDisplay = new Map<string, string>();
   for (const acc of accounts) {
@@ -264,6 +380,118 @@ export default async function DebugPartyPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Party Match History */}
+      <Card className="border-border/60">
+        <CardHeader>
+          <CardTitle>Party Match History</CardTitle>
+          <CardDescription>
+            Games reconstructed from correlated segment edges ({partyMatches.length} matches).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {partyMatches.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              No matches yet. Edges are clustered into matches when multiple players&apos; segments correlate.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {partyMatches.map((match, idx) => {
+                const teamRp = match.players.reduce((sum, p) => sum + (p.rpDelta ?? 0), 0);
+                return (
+                  <div
+                    key={idx}
+                    className="border-border/40 rounded-lg border p-3"
+                  >
+                    <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                      <span className="font-medium">{fmtDateTime(match.time)}</span>
+                      {match.map && (
+                        <span className="rounded bg-indigo-900/40 px-1.5 py-0.5 text-indigo-300">
+                          {match.map}
+                        </span>
+                      )}
+                      <span className="text-muted-foreground">
+                        {match.players.length} player{match.players.length > 1 ? "s" : ""}
+                      </span>
+                      <span className={`font-mono tabular-nums ${rpColor(teamRp)}`}>
+                        Team: {teamRp > 0 ? "+" : ""}{teamRp} RP
+                      </span>
+                      <span className={`font-mono tabular-nums ${scoreColor(match.avgScore)}`}>
+                        Avg score: {match.avgScore.toFixed(3)}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {confidenceTier(match.avgScore)}
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="text-muted-foreground border-b">
+                            <th className="px-2 py-1 font-medium">Player</th>
+                            <th className="px-2 py-1 font-medium">Legend</th>
+                            <th className="px-2 py-1 font-medium">Rank</th>
+                            <th className="px-2 py-1 font-medium text-right">RP</th>
+                            <th className="px-2 py-1 font-medium text-right">Duration</th>
+                            <th className="px-2 py-1 font-medium">Start</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {match.players.map((p) => (
+                            <tr key={p.segmentId} className="border-border/40 border-b last:border-0">
+                              <td className="px-2 py-1 font-medium">{p.ign}</td>
+                              <td className="px-2 py-1">{p.legend ?? "—"}</td>
+                              <td className="px-2 py-1 text-muted-foreground">{p.rank ?? "—"}</td>
+                              <td className={`px-2 py-1 text-right font-mono tabular-nums ${rpColor(p.rpDelta)}`}>
+                                {p.rpDelta != null ? (p.rpDelta > 0 ? "+" : "") + p.rpDelta : "—"}
+                              </td>
+                              <td className="px-2 py-1 text-right tabular-nums">
+                                {durationLabel(p.segStart, p.segEnd)}
+                              </td>
+                              <td className="px-2 py-1 whitespace-nowrap text-muted-foreground">
+                                {fmtDateTime(p.segStart)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <details className="mt-2">
+                      <summary className="text-muted-foreground cursor-pointer text-[10px] hover:text-foreground">
+                        Edge details ({match.edges.length} edge{match.edges.length > 1 ? "s" : ""})
+                      </summary>
+                      <div className="mt-1 space-y-1">
+                        {match.edges.map((edge, ei) => {
+                          const ev = edge.evidence;
+                          const vcSec = typeof ev.vcOverlapSec === "number" ? ev.vcOverlapSec : null;
+                          const startDelta = typeof ev.startDeltaMs === "number" ? ev.startDeltaMs : null;
+                          return (
+                            <div key={ei} className="rounded bg-muted/20 px-2 py-1 text-[10px] font-mono leading-tight">
+                              <span className="text-muted-foreground">{edge.ignA} ↔ {edge.ignB}</span>
+                              {" "}
+                              <span className={scoreColor(edge.score)}>score={edge.score.toFixed(3)}</span>
+                              {vcSec != null && <span className="text-muted-foreground"> vc={vcSec}s</span>}
+                              {startDelta != null && <span className="text-muted-foreground"> Δstart={( startDelta / 1000).toFixed(1)}s</span>}
+                              {typeof ev.legendCheck === "string" && <span className="text-muted-foreground"> legend={ev.legendCheck as string}</span>}
+                              <details className="mt-0.5 inline">
+                                <summary className="text-muted-foreground cursor-pointer hover:text-foreground ml-2">JSON</summary>
+                                <pre className="mt-0.5 max-h-32 max-w-md overflow-auto rounded bg-muted/30 p-1 text-[9px]">
+                                  {JSON.stringify(ev, null, 2)}
+                                </pre>
+                              </details>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </details>
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>
