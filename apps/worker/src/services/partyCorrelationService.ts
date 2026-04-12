@@ -22,18 +22,23 @@ const RP_SIMILARITY_WEIGHT = Number(process.env.PARTY_RP_WEIGHT ?? 0.1);
 const RP_SIGN_MISMATCH_PENALTY = Number(process.env.PARTY_RP_SIGN_PENALTY ?? -0.2);
 const MIN_SCORE_TO_PERSIST = Number(process.env.PARTY_MIN_SCORE ?? 0.15);
 
-// Timing-only discovery: used when VC data is unavailable.
-// Finds candidate pairs purely by segment start-time proximity, then
-// scores with redistributed weights (time + RP carry the VC weight).
+// Timing-only discovery: fallback when VC data is missing for one/both players.
+// Finds candidate pairs by segment start-time proximity, then scores with
+// redistributed weights. Rejects pairs where VC data EXISTS for both players
+// but shows they were NOT in the same channel.
 const TIMING_MAX_START_DELTA_MS = Number(process.env.PARTY_TIMING_MAX_START_DELTA_MS ?? 90_000);
 const TIMING_TIME_WEIGHT = Number(process.env.PARTY_TIMING_TIME_WEIGHT ?? 0.45);
 const TIMING_RP_WEIGHT = Number(process.env.PARTY_TIMING_RP_WEIGHT ?? 0.25);
-const TIMING_MIN_SCORE = Number(process.env.PARTY_TIMING_MIN_SCORE ?? 0.3);
+const TIMING_MIN_SCORE = Number(process.env.PARTY_TIMING_MIN_SCORE ?? 0.45);
+
+// Max teammates per game segment (Apex trios = 2 teammates max).
+const MAX_EDGES_PER_SEGMENT = Number(process.env.PARTY_MAX_EDGES_PER_SEGMENT ?? 2);
 
 type TSegmentCandidate = {
   segmentId: string;
   trackedAccountId: string;
   ownerUserId: string;
+  guildId: string;
   identityGroupId: string | null;
   startedAt: Date;
   endedAt: Date;
@@ -130,6 +135,7 @@ export async function correlateRecentSegments(sinceMs = 30 * 60 * 1000): Promise
        seg.id as "segmentId",
        seg.tracked_account_id as "trackedAccountId",
        ta.owner_user_id as "ownerUserId",
+       ta.guild_id as "guildId",
        ta.identity_group_id as "identityGroupId",
        seg.started_at as "startedAt",
        seg.ended_at as "endedAt",
@@ -195,6 +201,7 @@ export async function correlateRecentSegments(sinceMs = 30 * 60 * 1000): Promise
              seg.id as "segmentId",
              seg.tracked_account_id as "trackedAccountId",
              ta.owner_user_id as "ownerUserId",
+             ta.guild_id as "guildId",
              ta.identity_group_id as "identityGroupId",
              seg.started_at as "startedAt",
              seg.ended_at as "endedAt",
@@ -285,15 +292,17 @@ export async function correlateRecentSegments(sinceMs = 30 * 60 * 1000): Promise
   log("vc-based candidates", { count: candidates.length });
 
   // ── Phase 2: Timing-based candidate discovery ──────────────────────
-  // For segments that had no VC data (e.g. players in an untracked
-  // voice channel), discover candidate pairs purely by start-time
-  // proximity and score with redistributed weights.
+  // Fallback for when VC data is missing for one or both players.
+  // If VC data EXISTS for both players but shows they were NOT in the
+  // same channel, the pair is rejected — timing alone can't override VC
+  // evidence that they weren't together.
   for (const segA of segments) {
     const timingPeers = await pool.query<TSegmentCandidate>(
       `select
          seg.id as "segmentId",
          seg.tracked_account_id as "trackedAccountId",
          ta.owner_user_id as "ownerUserId",
+         ta.guild_id as "guildId",
          ta.identity_group_id as "identityGroupId",
          seg.started_at as "startedAt",
          seg.ended_at as "endedAt",
@@ -329,12 +338,43 @@ export async function correlateRecentSegments(sinceMs = 30 * 60 * 1000): Promise
       const startDeltaMs = Math.abs(segA.startedAt.getTime() - segB.startedAt.getTime());
       if (startDeltaMs > TIMING_MAX_START_DELTA_MS) continue;
 
+      // VC anti-check: if both players have VC data in the game window
+      // but were NOT in the same channel, reject the match.
+      const gameWindowStart = new Date(Math.min(segA.startedAt.getTime(), segB.startedAt.getTime()));
+      const gameWindowEnd = new Date(Math.max(segA.endedAt.getTime(), segB.endedAt.getTime()));
+
+      const vcCheckA = await pool.query<{ channelId: string }>(
+        `select distinct channel_id as "channelId"
+         from discord_voice_intervals
+         where discord_user_id = $1
+           and joined_at < $3
+           and (left_at is null or left_at > $2)`,
+        [segA.ownerUserId, gameWindowStart, gameWindowEnd],
+      );
+      const vcCheckB = await pool.query<{ channelId: string }>(
+        `select distinct channel_id as "channelId"
+         from discord_voice_intervals
+         where discord_user_id = $1
+           and joined_at < $3
+           and (left_at is null or left_at > $2)`,
+        [segB.ownerUserId, gameWindowStart, gameWindowEnd],
+      );
+
+      const channelsA = new Set(vcCheckA.rows.map((r) => r.channelId));
+      const channelsB = new Set(vcCheckB.rows.map((r) => r.channelId));
+      const bothHaveVc = channelsA.size > 0 && channelsB.size > 0;
+      const sharedChannel = bothHaveVc && [...channelsA].some((ch) => channelsB.has(ch));
+
+      if (bothHaveVc && !sharedChannel) {
+        // VC data proves they were NOT together — skip
+        continue;
+      }
+
       const timeAlign = scoreTimeAlignment(segA, segB);
       const legend = scoreLegendUniqueness(segA, segB);
       const rpRaw = scoreRpSimilarity(segA, segB);
 
       const timeScore = timeAlign.score * TIMING_TIME_WEIGHT;
-      // Re-scale RP: un-weight the raw score, then apply timing weight
       const rpScore = rpRaw.score >= 0
         ? (rpRaw.score / RP_SIMILARITY_WEIGHT) * TIMING_RP_WEIGHT
         : rpRaw.score;
@@ -348,10 +388,10 @@ export async function correlateRecentSegments(sinceMs = 30 * 60 * 1000): Promise
         segB,
         score: totalScore,
         evidence: {
-          discoveryMethod: "timing" as const,
+          discoveryMethod: bothHaveVc ? "timing+vc_confirmed" as const : "timing" as const,
           vcOverlapSec: 0,
           vcCoverage: 0,
-          channelId: null,
+          channelId: sharedChannel ? [...channelsA].find((ch) => channelsB.has(ch)) ?? null : null,
           startDeltaMs: timeAlign.startDeltaMs,
           durationRatio: Math.round(timeAlign.durationRatio * 100) / 100,
           legendCheck: legend.check,
@@ -372,13 +412,14 @@ export async function correlateRecentSegments(sinceMs = 30 * 60 * 1000): Promise
 
   log("scored candidates (vc + timing)", { count: candidates.length });
 
-  // Phase 3: greedy dedup — highest score wins, each segment can only
-  // pair with one peer segment per player pair.
-  // Key: "segId:peerAccountId" → prevents a segment from matching
-  // multiple of the same peer's segments.
+  // Phase 3: greedy dedup — highest score wins with two constraints:
+  // 1. Each segment can only pair with one of the same peer's segments.
+  // 2. Each segment can have at most MAX_EDGES_PER_SEGMENT edges total
+  //    (Apex trios = 2 teammates max).
   candidates.sort((a, b) => b.score - a.score);
 
   const claimed = new Set<string>();
+  const edgeCountBySegment = new Map<string, number>();
   let edgesCreated = 0;
 
   for (const c of candidates) {
@@ -394,8 +435,21 @@ export async function correlateRecentSegments(sinceMs = 30 * 60 * 1000): Promise
       continue;
     }
 
+    const countA = edgeCountBySegment.get(c.segA.segmentId) ?? 0;
+    const countB = edgeCountBySegment.get(c.segB.segmentId) ?? 0;
+    if (countA >= MAX_EDGES_PER_SEGMENT || countB >= MAX_EDGES_PER_SEGMENT) {
+      log("skipped (max edges per segment)", {
+        a: c.segA.segmentId.slice(0, 8),
+        b: c.segB.segmentId.slice(0, 8),
+        score: c.score,
+      });
+      continue;
+    }
+
     claimed.add(claimKeyA);
     claimed.add(claimKeyB);
+    edgeCountBySegment.set(c.segA.segmentId, countA + 1);
+    edgeCountBySegment.set(c.segB.segmentId, countB + 1);
 
     await upsertPartyEdge({
       segmentIdA: c.segA.segmentId,
