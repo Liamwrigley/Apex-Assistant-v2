@@ -22,6 +22,7 @@ function estimatedToSegments(games: TEstimatedGame[] | undefined): TSegmentRow[]
     closingCareerKills: g.closingCareerKills ?? null,
     openingCareerDamage: g.openingCareerDamage ?? null,
     closingCareerDamage: g.closingCareerDamage ?? null,
+    trackerDeltas: g.trackerDeltas,
   }));
 }
 

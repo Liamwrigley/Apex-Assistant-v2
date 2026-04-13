@@ -15,6 +15,7 @@ import {
   getLeaderboardWithDelta24h,
   getOpenSegmentStartTimes,
   getOpenSessionSummariesForTrackedAccountIds,
+  getPartyMatchEdges,
   getRankMovers24h,
   getRankTimelinesByTrackedAccountIds,
   getRecentCompletedSessions,
@@ -26,9 +27,11 @@ import { getTeamIdentity } from "@/lib/team-name";
 import { cn } from "@/lib/utils";
 import {
   buildGranularSnapshotsByAccount,
+  buildTrackerObsByAccount,
   mapOpenSessionsToRecentSessionRows,
   mapSessionsToRecentSessionRows,
 } from "@/lib/recent-session-rows";
+import { clusterMatchesFromEdges, serializePartyMatches, type TPartyMatchSerialized } from "@/lib/party-matches";
 
 export const dynamic = "force-dynamic";
 const debugLogs = (process.env.DEBUG_LOGS ?? "false").toLowerCase() === "true";
@@ -64,7 +67,6 @@ type TTrackedRow = {
   realtimeUpdatedAt: string | null;
   currentRankName: string | null;
   currentRankDivision: string | null;
-  currentRankIconUrl: string | null;
 };
 
 type TLeaderboardRow = {
@@ -74,7 +76,6 @@ type TLeaderboardRow = {
   rankScore: number;
   rankName: string;
   rankDivision: string | null;
-  iconUrl: string | null;
   deltaRp24h: number | null;
 };
 
@@ -97,7 +98,6 @@ type TStatsMover = {
   deltaRp: number;
   rankName: string | null;
   rankDivision: string | null;
-  iconUrl: string | null;
   rankScore: number | null;
 };
 
@@ -118,21 +118,21 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       latestRankScore: number | null;
       openingRankName: string | null;
       openingRankDivision: string | null;
-      openingRankIconUrl: string | null;
       latestRankName: string | null;
       latestRankDivision: string | null;
-      latestRankIconUrl: string | null;
       legends: string[];
       gameStartedAt: string | null;
     }
   >;
   recentSessions: TRecentSessionRow[];
+  partyMatches: TPartyMatchSerialized[];
 }> {
-  const [leaderboardRows, trackedAccounts, stats24h, recentSessionsRaw] = await Promise.all([
+  const [leaderboardRows, trackedAccounts, stats24h, recentSessionsRaw, matchEdges] = await Promise.all([
     getLeaderboardWithDelta24h(guildFilter),
     listTrackedAccounts(guildFilter),
     getRankMovers24h(guildFilter),
     getRecentCompletedSessions(200),
+    getPartyMatchEdges(300),
   ]);
 
   const leaderboard = [...leaderboardRows]
@@ -144,7 +144,6 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       rankScore: r.rankScore,
       rankName: r.rankName,
       rankDivision: r.rankDivision ?? null,
-      iconUrl: r.iconUrl ?? null,
       deltaRp24h: r.deltaRp24h,
     }));
 
@@ -176,7 +175,6 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       : null,
     currentRankName: row.currentRankName ?? null,
     currentRankDivision: row.currentRankDivision ?? null,
-    currentRankIconUrl: row.currentRankIconUrl ?? null,
   }));
 
   const allTrackedAccountIds = trackedAccounts.map((r) => r.id);
@@ -210,10 +208,8 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       latestRankScore: number | null;
       openingRankName: string | null;
       openingRankDivision: string | null;
-      openingRankIconUrl: string | null;
       latestRankName: string | null;
       latestRankDivision: string | null;
-      latestRankIconUrl: string | null;
       legends: string[];
       gameStartedAt: string | null;
     }
@@ -233,10 +229,8 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       latestRankScore: s.latestRankScore,
       openingRankName: s.openingRankName,
       openingRankDivision: s.openingRankDivision,
-      openingRankIconUrl: s.openingRankIconUrl,
       latestRankName: s.latestRankName,
       latestRankDivision: s.latestRankDivision,
-      latestRankIconUrl: s.latestRankIconUrl,
       legends,
       gameStartedAt: segStart ? toIso(segStart) : null,
     };
@@ -250,10 +244,13 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
   ];
   const segmentsBySession = await getSegmentsBySessionIds(sessionIds);
 
+  const trackerObsByAccount = await buildTrackerObsByAccount(segmentsBySession);
+
   const completedRecentSessions = mapSessionsToRecentSessionRows(
     recentSessionsRaw,
     segmentsBySession,
-    granularSnapshotsByAccount
+    granularSnapshotsByAccount,
+    trackerObsByAccount
   );
   const accountByTrackedId = new Map(
     trackedAccounts.map((a) => [a.id, { ign: a.ign, platform: a.platform }])
@@ -261,7 +258,8 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
   const activeRecentSessions = await mapOpenSessionsToRecentSessionRows(
     openSessionSummaries,
     accountByTrackedId,
-    segmentsBySession
+    segmentsBySession,
+    trackerObsByAccount
   );
   const recentSessions = [...activeRecentSessions, ...completedRecentSessions];
 
@@ -279,7 +277,6 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     return {
       rankName: row?.rankName ?? null,
       rankDivision: row?.rankDivision ?? null,
-      iconUrl: row?.iconUrl ?? null,
       rankScore: row?.rankScore ?? null,
     };
   }
@@ -308,6 +305,8 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
       : null,
   };
 
+  const partyMatches = serializePartyMatches(clusterMatchesFromEdges(matchEdges));
+
   return {
     leaderboard,
     tracked,
@@ -316,6 +315,7 @@ async function loadDashboardFromDb(guildFilter: string | undefined): Promise<{
     partyGroups,
     openSessionByTrackedId,
     recentSessions,
+    partyMatches,
   };
 }
 
@@ -335,6 +335,7 @@ export default async function HomePage() {
     partyGroups,
     openSessionByTrackedId,
     recentSessions,
+    partyMatches,
   } = await loadDashboardFromDb(guildFilter);
   const nowMs = Date.now();
   const top = leaderboard[0] ?? null;
@@ -631,7 +632,7 @@ export default async function HomePage() {
         </Card>
       ) : null}
 
-      <RecentSessionsSection rows={recentSessions} />
+      <RecentSessionsSection rows={recentSessions} partyMatches={partyMatches} />
 
       <Card>
         <CardHeader>

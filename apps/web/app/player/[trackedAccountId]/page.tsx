@@ -16,6 +16,7 @@ import {
   getStackCompositions,
   getBaselineAvgRp,
   getBestStackByMap,
+  getPartyMatchEdgesByAccount,
 } from "@apex-assistant/db";
 import { buildTrackerRowsForProfile } from "@/lib/tracker-profile-rows";
 import {
@@ -41,6 +42,7 @@ import { SessionRankSnap, type TSessionRankSnap } from "@/components/session-ran
 import { formatDurationMs } from "@/lib/format-duration";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
+import { getRankIconUrl } from "@/lib/rank-icon-url";
 import { resolveProfileDisplayLegendName } from "@/lib/profile-display-legend";
 import {
   evaluateRealtimePresence,
@@ -52,9 +54,11 @@ import { RecentSessionsSection } from "@/components/recent-sessions-section";
 import { StackMatesSection } from "./stack-mates-section";
 import {
   buildGranularSnapshotsByAccount,
+  buildTrackerObsByAccount,
   mapOpenSessionsToRecentSessionRows,
   mapSessionsToRecentSessionRows,
 } from "@/lib/recent-session-rows";
+import { clusterMatchesFromEdges, serializePartyMatches } from "@/lib/party-matches";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -77,9 +81,8 @@ function toSnap(
   score: number | null,
   name: string | null,
   division: string | null,
-  icon: string | null
 ): TSessionRankSnap {
-  return { rankScore: score, rankName: name, rankDivision: division, iconUrl: icon };
+  return { rankScore: score, rankName: name, rankDivision: division };
 }
 
 function platformLabel(platform: string): string {
@@ -238,15 +241,19 @@ export default async function PlayerProfilePage(props: {
     ]),
   ];
 
-  const [segmentsBySession, granularSnapshotsByAccount] = await Promise.all([
+  const [segmentsBySession, granularSnapshotsByAccount, matchEdges] = await Promise.all([
     getSegmentsBySessionIds(sessionIds),
     buildGranularSnapshotsByAccount(recentSessions),
+    getPartyMatchEdgesByAccount(trackedAccountId, 300),
   ]);
+
+  const trackerObsByAccount = await buildTrackerObsByAccount(segmentsBySession);
 
   const completedSessionRows = mapSessionsToRecentSessionRows(
     recentSessions,
     segmentsBySession,
-    granularSnapshotsByAccount
+    granularSnapshotsByAccount,
+    trackerObsByAccount
   );
   const accountByTrackedId = new Map([
     [trackedAccountId, { ign: account.ign, platform: account.platform }],
@@ -254,9 +261,11 @@ export default async function PlayerProfilePage(props: {
   const activeSessionRows = await mapOpenSessionsToRecentSessionRows(
     openSessionSummaries,
     accountByTrackedId,
-    segmentsBySession
+    segmentsBySession,
+    trackerObsByAccount
   );
   const recentSessionRows = [...activeSessionRows, ...completedSessionRows];
+  const partyMatches = serializePartyMatches(clusterMatchesFromEdges(matchEdges));
 
   const lastSeenLegendUrl = lastSeenLegendIconUrl;
 
@@ -316,7 +325,7 @@ export default async function PlayerProfilePage(props: {
           <PlayerProfileHeroImage
             isOnline={isOnline}
             lastSeenLegendUrl={lastSeenLegendUrl}
-            currentRankIconUrl={account.currentRankIconUrl}
+            currentRankIconUrl={getRankIconUrl(account.currentRankName, account.currentRankDivision)}
             alt={account.realtimeSelectedLegend ?? account.ign}
           />
 
@@ -339,9 +348,9 @@ export default async function PlayerProfilePage(props: {
                 </div>
                 {account.currentRankName ? (
                   <div className="mt-1 flex items-center gap-1.5">
-                    {account.currentRankIconUrl ? (
+                    {getRankIconUrl(account.currentRankName, account.currentRankDivision) ? (
                       <img
-                        src={account.currentRankIconUrl}
+                        src={getRankIconUrl(account.currentRankName, account.currentRankDivision)!}
                         alt=""
                         className="h-4 w-4 shrink-0 object-contain"
                       />
@@ -429,7 +438,6 @@ export default async function PlayerProfilePage(props: {
                         rankScore: openSession.openingRankScore,
                         rankName: openSession.openingRankName,
                         rankDivision: openSession.openingRankDivision,
-                        iconUrl: openSession.openingRankIconUrl,
                       }}
                       compact
                     />
@@ -439,7 +447,6 @@ export default async function PlayerProfilePage(props: {
                         rankScore: openSession.latestRankScore,
                         rankName: openSession.latestRankName,
                         rankDivision: openSession.latestRankDivision,
-                        iconUrl: openSession.latestRankIconUrl,
                       }}
                       compact
                     />
@@ -510,7 +517,7 @@ export default async function PlayerProfilePage(props: {
 
       <RecentSessionsSection
         rows={recentSessionRows}
-        showAllSessions
+        partyMatches={partyMatches}
         hidePlayerColumn
         emptyCardContent={
           <p className="text-muted-foreground text-sm">No completed sessions yet.</p>

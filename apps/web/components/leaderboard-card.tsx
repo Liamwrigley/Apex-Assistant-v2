@@ -18,7 +18,6 @@ type TLeaderboardRow = {
   rankScore: number;
   rankName: string;
   rankDivision: string | null;
-  iconUrl: string | null;
   deltaRp24h: number | null;
 };
 

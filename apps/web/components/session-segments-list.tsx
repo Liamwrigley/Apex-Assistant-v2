@@ -7,10 +7,6 @@ import { cn } from "@/lib/utils";
 import type { TSegmentRow } from "@/components/session-segment-types";
 import { ChevronRight } from "lucide-react";
 
-function delta(open: number | null, close: number | null): number | null {
-  return open != null && close != null ? close - open : null;
-}
-
 export function SessionGamesSummary(props: {
   segments: TSegmentRow[];
   className?: string;
@@ -51,8 +47,7 @@ export function SessionSegmentsList(props: {
     <ul className={cn("flex flex-col gap-2", props.className)}>
       {segs.map((seg, i) => {
         const iconUrl = seg.legendAssumed ? getLegendIconUrl(seg.legendAssumed) : null;
-        const dK = delta(seg.openingCareerKills, seg.closingCareerKills);
-        const dD = delta(seg.openingCareerDamage, seg.closingCareerDamage);
+        const trackers = seg.trackerDeltas ?? [];
         const durationMs =
           seg.endedAt
             ? new Date(seg.endedAt).getTime() - new Date(seg.startedAt).getTime()
@@ -74,14 +69,21 @@ export function SessionSegmentsList(props: {
               <RpDeltaBadge delta={seg.rpDelta} />
             </div>
             <dl className="text-muted-foreground mt-2 grid grid-cols-2 gap-x-3 gap-y-1 tabular-nums sm:grid-cols-4">
-              <div>
-                <dt className="text-[10px] uppercase tracking-wide">Kills</dt>
-                <dd>{dK != null ? dK : "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-[10px] uppercase tracking-wide">Dmg</dt>
-                <dd>{dD != null ? dD.toLocaleString() : "—"}</dd>
-              </div>
+              {trackers.length > 0 ? (
+                trackers.map((t) => (
+                  <div key={`${t.trackerKey}-${t.dataIndex}`}>
+                    <dt className="text-[10px] uppercase tracking-wide truncate" title={t.displayName}>
+                      {t.displayName}
+                    </dt>
+                    <dd>{t.delta != null ? t.delta.toLocaleString() : "—"}</dd>
+                  </div>
+                ))
+              ) : (
+                <div className="col-span-2 sm:col-span-2">
+                  <dt className="text-[10px] uppercase tracking-wide">Trackers</dt>
+                  <dd className="text-muted-foreground">No tracker data</dd>
+                </div>
+              )}
               <div className="min-w-0 sm:col-span-1">
                 <dt className="text-[10px] uppercase tracking-wide">Map</dt>
                 <dd className="truncate">{mapName ?? "—"}</dd>

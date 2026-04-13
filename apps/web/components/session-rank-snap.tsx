@@ -1,10 +1,10 @@
+import { getRankIconUrl } from "@/lib/rank-icon-url";
 import { cn } from "@/lib/utils";
 
 export type TSessionRankSnap = {
   rankScore: number | null;
   rankName: string | null;
   rankDivision: string | null;
-  iconUrl: string | null;
 };
 
 /** Rank tier + RP for session start/end (matches leaderboard rank cell style). */
@@ -16,8 +16,9 @@ export function SessionRankSnap(props: {
 }) {
   const { snap, label, compact } = props;
   const showLabel = Boolean(label?.trim());
+  const iconUrl = getRankIconUrl(snap.rankName, snap.rankDivision);
   const hasAny =
-    snap.rankScore !== null || Boolean(snap.rankName?.trim()) || Boolean(snap.iconUrl);
+    snap.rankScore !== null || Boolean(snap.rankName?.trim()) || Boolean(iconUrl);
   if (!hasAny) {
     return (
       <div>
@@ -41,9 +42,9 @@ export function SessionRankSnap(props: {
         </div>
       ) : null}
       <div className={cn("flex items-start gap-2", compact && "gap-1.5")}>
-        {snap.iconUrl ? (
+        {iconUrl ? (
           <img
-            src={snap.iconUrl}
+            src={iconUrl}
             alt=""
             className={cn(
               "mt-0.5 shrink-0 object-contain",

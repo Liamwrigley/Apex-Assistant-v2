@@ -1,15 +1,115 @@
 import {
   getRankSnapshotsBetween,
+  getTrackerObservationsInRange,
   segmentCountsAsInferredRankedGame,
   type TInferredGameSegment,
   type TOpenSessionSummary,
   type TRecentCompletedSessionRow,
+  type TTrackerObservationRow,
 } from "@apex-assistant/db";
 import { rankPointsForSessionWindow } from "@/lib/session-rank-sparkline";
-import type { TRecentSessionRow } from "@/components/recent-sessions-types";
+import type { TRecentSessionRow, TEstimatedGameTrackerDelta } from "@/components/recent-sessions-types";
 
 function toIso(d: Date | string): string {
   return d instanceof Date ? d.toISOString() : String(d);
+}
+
+function findClosestBatchTime(sortedTimes: number[], targetMs: number): number | null {
+  if (sortedTimes.length === 0) return null;
+  let best = sortedTimes[0];
+  let bestDist = Math.abs(best - targetMs);
+  for (const t of sortedTimes) {
+    const dist = Math.abs(t - targetMs);
+    if (dist < bestDist) {
+      best = t;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+function computeSegmentTrackerDeltas(
+  seg: TInferredGameSegment,
+  observations: TTrackerObservationRow[]
+): TEstimatedGameTrackerDelta[] {
+  if (!seg.legendAssumed || observations.length === 0 || !seg.endedAt) return [];
+
+  const normLegend = seg.legendAssumed.trim().toLowerCase();
+  const legendObs = observations.filter(
+    (o) => o.legendName.trim().toLowerCase() === normLegend
+  );
+  if (legendObs.length === 0) return [];
+
+  const batches = new Map<number, TTrackerObservationRow[]>();
+  for (const obs of legendObs) {
+    const t = new Date(obs.capturedAt).getTime();
+    const list = batches.get(t);
+    if (list) list.push(obs);
+    else batches.set(t, [obs]);
+  }
+  const batchTimes = [...batches.keys()].sort((a, b) => a - b);
+
+  const startMs = new Date(seg.startedAt).getTime();
+  const endMs = new Date(seg.endedAt).getTime();
+  const openBatchTime = findClosestBatchTime(batchTimes, startMs);
+  const closeBatchTime = findClosestBatchTime(batchTimes, endMs);
+  if (openBatchTime === null || closeBatchTime === null) return [];
+  if (openBatchTime === closeBatchTime) return [];
+
+  const openBatch = batches.get(openBatchTime)!;
+  const closeBatch = batches.get(closeBatchTime)!;
+
+  const openMap = new Map<string, TTrackerObservationRow>();
+  for (const obs of openBatch) {
+    openMap.set(`${obs.trackerKey}\0${obs.dataIndex}`, obs);
+  }
+
+  const deltas: TEstimatedGameTrackerDelta[] = [];
+  for (const closeObs of closeBatch) {
+    const openObs = openMap.get(`${closeObs.trackerKey}\0${closeObs.dataIndex}`);
+    deltas.push({
+      displayName: closeObs.displayName,
+      trackerKey: closeObs.trackerKey,
+      dataIndex: closeObs.dataIndex,
+      delta: openObs != null ? closeObs.value - openObs.value : null,
+      endValue: closeObs.value,
+    });
+  }
+  return deltas.sort((a, b) => a.dataIndex - b.dataIndex);
+}
+
+/** Bulk-fetch tracker observations for all accounts that appear in the given segments. */
+export async function buildTrackerObsByAccount(
+  segmentsBySession: Record<string, TInferredGameSegment[]>
+): Promise<Record<string, TTrackerObservationRow[]>> {
+  const allSegments = Object.values(segmentsBySession).flat();
+  if (allSegments.length === 0) return {};
+
+  const rangeByAccount = new Map<string, { min: number; max: number }>();
+  for (const seg of allSegments) {
+    const tid = seg.trackedAccountId;
+    const startMs = new Date(seg.startedAt).getTime();
+    const endMs = seg.endedAt ? new Date(seg.endedAt).getTime() : Date.now();
+    const cur = rangeByAccount.get(tid);
+    if (cur) {
+      cur.min = Math.min(cur.min, startMs);
+      cur.max = Math.max(cur.max, endMs);
+    } else {
+      rangeByAccount.set(tid, { min: startMs, max: endMs });
+    }
+  }
+
+  const out: Record<string, TTrackerObservationRow[]> = {};
+  await Promise.all(
+    [...rangeByAccount.entries()].map(async ([tid, range]) => {
+      out[tid] = await getTrackerObservationsInRange(
+        tid,
+        new Date(range.min),
+        new Date(range.max)
+      );
+    })
+  );
+  return out;
 }
 
 /** One DB query per distinct account covering the min–max session window for those rows. */
@@ -44,7 +144,8 @@ export async function buildGranularSnapshotsByAccount(
 export function mapSessionsToRecentSessionRows(
   sessions: TRecentCompletedSessionRow[],
   segmentsBySession: Record<string, TInferredGameSegment[]>,
-  granularSnapshotsByAccount: Record<string, Array<{ capturedAt: string; rankScore: number }>>
+  granularSnapshotsByAccount: Record<string, Array<{ capturedAt: string; rankScore: number }>>,
+  trackerObsByAccount?: Record<string, TTrackerObservationRow[]>
 ): TRecentSessionRow[] {
   return sessions.map((r) => ({
     sessionId: r.sessionId,
@@ -58,10 +159,8 @@ export function mapSessionsToRecentSessionRows(
     latestRankScore: r.latestRankScore,
     openingRankName: r.openingRankName,
     openingRankDivision: r.openingRankDivision,
-    openingRankIconUrl: r.openingRankIconUrl,
     latestRankName: r.latestRankName,
     latestRankDivision: r.latestRankDivision,
-    latestRankIconUrl: r.latestRankIconUrl,
     legends: r.legends,
     rankSparklinePoints: rankPointsForSessionWindow(
       granularSnapshotsByAccount[r.trackedAccountId],
@@ -90,6 +189,10 @@ export function mapSessionsToRecentSessionRows(
         closingCareerKills: seg.closingCareerKills,
         openingCareerDamage: seg.openingCareerDamage,
         closingCareerDamage: seg.closingCareerDamage,
+        trackerDeltas: computeSegmentTrackerDeltas(
+          seg,
+          trackerObsByAccount?.[seg.trackedAccountId] ?? []
+        ),
       })),
   }));
 }
@@ -97,7 +200,8 @@ export function mapSessionsToRecentSessionRows(
 export async function mapOpenSessionsToRecentSessionRows(
   openSessions: TOpenSessionSummary[],
   accountByTrackedId: Map<string, { ign: string; platform: string }>,
-  segmentsBySession: Record<string, TInferredGameSegment[]>
+  segmentsBySession: Record<string, TInferredGameSegment[]>,
+  trackerObsByAccount?: Record<string, TTrackerObservationRow[]>
 ): Promise<TRecentSessionRow[]> {
   return Promise.all(
     openSessions.map(async (o) => {
@@ -122,10 +226,8 @@ export async function mapOpenSessionsToRecentSessionRows(
         latestRankScore: o.latestRankScore,
         openingRankName: o.openingRankName,
         openingRankDivision: o.openingRankDivision,
-        openingRankIconUrl: o.openingRankIconUrl,
         latestRankName: o.latestRankName,
         latestRankDivision: o.latestRankDivision,
-        latestRankIconUrl: o.latestRankIconUrl,
         legends: o.legends,
         rankSparklinePoints: rankPointsForSessionWindow(
           granular,
@@ -154,6 +256,10 @@ export async function mapOpenSessionsToRecentSessionRows(
             closingCareerKills: seg.closingCareerKills,
             openingCareerDamage: seg.openingCareerDamage,
             closingCareerDamage: seg.closingCareerDamage,
+            trackerDeltas: computeSegmentTrackerDeltas(
+              seg,
+              trackerObsByAccount?.[seg.trackedAccountId] ?? []
+            ),
           })),
       };
     })

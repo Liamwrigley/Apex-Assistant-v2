@@ -1,3 +1,11 @@
+export type TEstimatedGameTrackerDelta = {
+  displayName: string;
+  trackerKey: string;
+  dataIndex: number;
+  delta: number | null;
+  endValue: number;
+};
+
 export type TEstimatedGame = {
   legend: string | null;
   rpDelta: number | null;
@@ -13,6 +21,7 @@ export type TEstimatedGame = {
   closingCareerKills?: number | null;
   openingCareerDamage?: number | null;
   closingCareerDamage?: number | null;
+  trackerDeltas?: TEstimatedGameTrackerDelta[];
 };
 
 export type TRecentSessionRow = {
@@ -29,10 +38,8 @@ export type TRecentSessionRow = {
   latestRankScore: number | null;
   openingRankName: string | null;
   openingRankDivision: string | null;
-  openingRankIconUrl: string | null;
   latestRankName: string | null;
   latestRankDivision: string | null;
-  latestRankIconUrl: string | null;
   legends: string[];
   /** Rank snapshots within the session window (plus open/close fallback). */
   rankSparklinePoints: Array<{ capturedAt: string; rankScore: number }>;

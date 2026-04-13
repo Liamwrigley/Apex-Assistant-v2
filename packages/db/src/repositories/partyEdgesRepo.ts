@@ -561,8 +561,20 @@ export type TPartyMatchEdge = {
   legendB: string | null;
   rpDeltaA: number | null;
   rpDeltaB: number | null;
-  rankA: string | null;
-  rankB: string | null;
+  openingRankNameA: string | null;
+  openingRankNameB: string | null;
+  closingRankNameA: string | null;
+  closingRankNameB: string | null;
+  openingRankDivisionA: string | null;
+  openingRankDivisionB: string | null;
+  closingRankDivisionA: string | null;
+  closingRankDivisionB: string | null;
+  openingRankScoreA: number | null;
+  openingRankScoreB: number | null;
+  closingRankScoreA: number | null;
+  closingRankScoreB: number | null;
+  rankIconUrlA: string | null;
+  rankIconUrlB: string | null;
   mapA: string | null;
   mapB: string | null;
   segStartA: Date;
@@ -592,8 +604,20 @@ export async function getPartyMatchEdges(
        seg_b.legend_assumed as "legendB",
        seg_a.rp_delta as "rpDeltaA",
        seg_b.rp_delta as "rpDeltaB",
-       coalesce(seg_a.closing_rank_name, seg_a.opening_rank_name) as "rankA",
-       coalesce(seg_b.closing_rank_name, seg_b.opening_rank_name) as "rankB",
+       seg_a.opening_rank_name as "openingRankNameA",
+       seg_b.opening_rank_name as "openingRankNameB",
+       seg_a.closing_rank_name as "closingRankNameA",
+       seg_b.closing_rank_name as "closingRankNameB",
+       seg_a.opening_rank_division as "openingRankDivisionA",
+       seg_b.opening_rank_division as "openingRankDivisionB",
+       seg_a.closing_rank_division as "closingRankDivisionA",
+       seg_b.closing_rank_division as "closingRankDivisionB",
+       seg_a.opening_rank_score as "openingRankScoreA",
+       seg_b.opening_rank_score as "openingRankScoreB",
+       seg_a.closing_rank_score as "closingRankScoreA",
+       seg_b.closing_rank_score as "closingRankScoreB",
+       ta_a.current_rank_icon_url as "rankIconUrlA",
+       ta_b.current_rank_icon_url as "rankIconUrlB",
        coalesce(seg_a.ranked_map_name_open, seg_a.ranked_map_name_close) as "mapA",
        coalesce(seg_b.ranked_map_name_open, seg_b.ranked_map_name_close) as "mapB",
        seg_a.started_at as "segStartA",
@@ -610,6 +634,62 @@ export async function getPartyMatchEdges(
      order by least(seg_a.started_at, seg_b.started_at) desc
      limit $1`,
     [limit],
+  );
+  return result.rows;
+}
+
+/**
+ * Same as getPartyMatchEdges but filtered to edges involving a specific account.
+ */
+export async function getPartyMatchEdgesByAccount(
+  trackedAccountId: string,
+  limit = 300,
+): Promise<TPartyMatchEdge[]> {
+  const result = await pool.query<TPartyMatchEdge>(
+    `select
+       e.id as "edgeId",
+       e.segment_id_a as "segmentIdA",
+       e.segment_id_b as "segmentIdB",
+       e.score,
+       e.evidence,
+       ta_a.ign as "ignA",
+       ta_b.ign as "ignB",
+       seg_a.legend_assumed as "legendA",
+       seg_b.legend_assumed as "legendB",
+       seg_a.rp_delta as "rpDeltaA",
+       seg_b.rp_delta as "rpDeltaB",
+       seg_a.opening_rank_name as "openingRankNameA",
+       seg_b.opening_rank_name as "openingRankNameB",
+       seg_a.closing_rank_name as "closingRankNameA",
+       seg_b.closing_rank_name as "closingRankNameB",
+       seg_a.opening_rank_division as "openingRankDivisionA",
+       seg_b.opening_rank_division as "openingRankDivisionB",
+       seg_a.closing_rank_division as "closingRankDivisionA",
+       seg_b.closing_rank_division as "closingRankDivisionB",
+       seg_a.opening_rank_score as "openingRankScoreA",
+       seg_b.opening_rank_score as "openingRankScoreB",
+       seg_a.closing_rank_score as "closingRankScoreA",
+       seg_b.closing_rank_score as "closingRankScoreB",
+       ta_a.current_rank_icon_url as "rankIconUrlA",
+       ta_b.current_rank_icon_url as "rankIconUrlB",
+       coalesce(seg_a.ranked_map_name_open, seg_a.ranked_map_name_close) as "mapA",
+       coalesce(seg_b.ranked_map_name_open, seg_b.ranked_map_name_close) as "mapB",
+       seg_a.started_at as "segStartA",
+       seg_b.started_at as "segStartB",
+       seg_a.ended_at as "segEndA",
+       seg_b.ended_at as "segEndB",
+       extract(epoch from (seg_a.ended_at - seg_a.started_at))::int as "durationA",
+       extract(epoch from (seg_b.ended_at - seg_b.started_at))::int as "durationB"
+     from party_segment_edges e
+     join inferred_game_segments seg_a on seg_a.id = e.segment_id_a
+     join inferred_game_segments seg_b on seg_b.id = e.segment_id_b
+     join tracked_accounts ta_a on ta_a.id = e.tracked_account_id_a
+     join tracked_accounts ta_b on ta_b.id = e.tracked_account_id_b
+     where e.tracked_account_id_a = $1::uuid
+        or e.tracked_account_id_b = $1::uuid
+     order by least(seg_a.started_at, seg_b.started_at) desc
+     limit $2`,
+    [trackedAccountId, limit],
   );
   return result.rows;
 }

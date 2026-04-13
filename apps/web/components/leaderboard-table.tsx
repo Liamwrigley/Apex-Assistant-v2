@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { PendingLink } from "@/components/pending-link";
 import { PlayerTimelineSparkline } from "@/components/player-timeline-sparkline";
+import { getRankIconUrl } from "@/lib/rank-icon-url";
 import { RpDeltaBadge } from "@/components/rp-delta-badge";
 
 type TLeaderboardRow = {
@@ -12,7 +13,6 @@ type TLeaderboardRow = {
   rankScore: number;
   rankName: string;
   rankDivision: string | null;
-  iconUrl: string | null;
   deltaRp24h: number | null;
 };
 type TTimelinePoint = { capturedAt: string; rankScore: number };
@@ -172,9 +172,9 @@ export function LeaderboardTable(props: {
               </td>
               <td className="px-2 py-2 align-middle">
                 <div className="flex min-w-0 items-start gap-2 leading-tight">
-                  {row.iconUrl ? (
+                  {getRankIconUrl(row.rankName, row.rankDivision) ? (
                     <img
-                      src={row.iconUrl}
+                      src={getRankIconUrl(row.rankName, row.rankDivision)!}
                       alt=""
                       className="mt-0.5 h-8 w-8 shrink-0 object-contain"
                     />

@@ -208,6 +208,41 @@ export async function getTrackerStatDeltasForTrackedAccount(
   });
 }
 
+/**
+ * All observation rows for one account between two timestamps (with a small buffer).
+ * Used to compute per-segment tracker deltas by matching observations to segment boundaries.
+ */
+export async function getTrackerObservationsInRange(
+  trackedAccountId: string,
+  from: Date,
+  to: Date
+): Promise<TTrackerObservationRow[]> {
+  const bufferMs = 120_000;
+  const bufferedFrom = new Date(from.getTime() - bufferMs);
+  const bufferedTo = new Date(to.getTime() + bufferMs);
+  const result = await pool.query<TTrackerObservationRow>(
+    `select
+      id,
+      tracked_account_id as "trackedAccountId",
+      captured_at as "capturedAt",
+      legend_name as "legendName",
+      tracker_key as "trackerKey",
+      display_name as "displayName",
+      value,
+      global_flag as "globalFlag",
+      data_index as "dataIndex",
+      source,
+      selected_legend_at_poll as "selectedLegendAtPoll"
+    from tracker_stat_observations
+    where tracked_account_id = $1::uuid
+      and captured_at >= $2
+      and captured_at <= $3
+    order by captured_at asc, data_index asc`,
+    [trackedAccountId, bufferedFrom, bufferedTo]
+  );
+  return result.rows;
+}
+
 export async function hasAnyTrackerObservations(trackedAccountId: string): Promise<boolean> {
   const r = await pool.query<{ c: string }>(
     `select count(*)::text as c from tracker_stat_observations where tracked_account_id = $1::uuid limit 1`,

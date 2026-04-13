@@ -1,3 +1,11 @@
+export type TSegmentTrackerDelta = {
+  displayName: string;
+  trackerKey: string;
+  dataIndex: number;
+  delta: number | null;
+  endValue: number;
+};
+
 export type TSegmentRow = {
   legendAssumed: string | null;
   rpDelta: number | null;
@@ -11,4 +19,5 @@ export type TSegmentRow = {
   closingCareerKills: number | null;
   openingCareerDamage: number | null;
   closingCareerDamage: number | null;
+  trackerDeltas?: TSegmentTrackerDelta[];
 };

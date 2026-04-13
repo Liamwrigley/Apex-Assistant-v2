@@ -2,6 +2,7 @@
 
 import { PendingLink } from "@/components/pending-link";
 import { formatRelativeTime } from "@/lib/format-relative-time";
+import { getRankIconUrl } from "@/lib/rank-icon-url";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -15,7 +16,6 @@ export type TTrackedAccountTableRow = {
   lastCheckedAt: string | null;
   currentRankName: string | null;
   currentRankDivision: string | null;
-  currentRankIconUrl: string | null;
 };
 
 /** In-cell spine + dot (original style), inset so it reads with the player column. */
@@ -185,9 +185,9 @@ export function TrackedAccountsOwnerTable(props: {
                     <td className="px-2 py-2">
                       {row.currentRankName ? (
                         <div className="flex min-w-0 items-center gap-2">
-                          {row.currentRankIconUrl ? (
+                          {getRankIconUrl(row.currentRankName, row.currentRankDivision) ? (
                             <img
-                              src={row.currentRankIconUrl}
+                              src={getRankIconUrl(row.currentRankName, row.currentRankDivision)!}
                               alt=""
                               className="h-8 w-8 shrink-0 object-contain"
                             />

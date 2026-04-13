@@ -3,6 +3,7 @@ import { evaluateRealtimePresence } from "@/lib/realtime-presence";
 import { formatDurationMs } from "@/lib/format-duration";
 import { computeRankScoreDelta, RpDeltaBadge } from "@/components/rp-delta-badge";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
+import { getRankIconUrl } from "@/lib/rank-icon-url";
 import { cn } from "@/lib/utils";
 
 export type TLivePresenceCardRow = {
@@ -20,7 +21,6 @@ export type TLivePresenceCardRow = {
   realtimeUpdatedAt: string | null;
   currentRankName: string | null;
   currentRankDivision: string | null;
-  currentRankIconUrl: string | null;
 };
 
 export type TLivePresenceSessionProps = {
@@ -29,10 +29,8 @@ export type TLivePresenceSessionProps = {
   latestRankScore: number | null;
   openingRankName: string | null;
   openingRankDivision: string | null;
-  openingRankIconUrl: string | null;
   latestRankName: string | null;
   latestRankDivision: string | null;
-  latestRankIconUrl: string | null;
   legends: string[];
   gameStartedAt: string | null;
 } | null;
@@ -60,12 +58,12 @@ const glassPanelClass = cn(
 
 function InlineRankSnap(props: {
   label: string;
-  iconUrl: string | null;
   rankName: string | null;
   rankDivision: string | null;
   rankScore: number | null;
 }) {
-  const { label, iconUrl, rankName, rankDivision, rankScore } = props;
+  const { label, rankName, rankDivision, rankScore } = props;
+  const iconUrl = getRankIconUrl(rankName, rankDivision);
   const tierLine = [rankName?.trim(), rankDivision?.trim()]
     .filter(Boolean)
     .join(" ");
@@ -98,7 +96,7 @@ export function LivePresenceCard(props: {
 }) {
   const { row, session, nowMs } = props;
   const legendIconUrl = getLegendIconUrl(row.realtimeSelectedLegend);
-  const heroIconUrl = legendIconUrl ?? row.currentRankIconUrl;
+  const heroIconUrl = legendIconUrl ?? getRankIconUrl(row.currentRankName, row.currentRankDivision);
 
   const evaluation = evaluateRealtimePresence({
     realtimeUpdatedAt: row.realtimeUpdatedAt,
@@ -206,14 +204,12 @@ export function LivePresenceCard(props: {
               <div className="mt-1 flex items-end justify-between gap-2">
                 <InlineRankSnap
                   label="Start"
-                  iconUrl={session.openingRankIconUrl}
                   rankName={session.openingRankName}
                   rankDivision={session.openingRankDivision}
                   rankScore={session.openingRankScore}
                 />
                 <InlineRankSnap
                   label="Now"
-                  iconUrl={session.latestRankIconUrl}
                   rankName={session.latestRankName}
                   rankDivision={session.latestRankDivision}
                   rankScore={session.latestRankScore}
