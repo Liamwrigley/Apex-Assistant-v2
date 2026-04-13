@@ -59,6 +59,12 @@ function confidenceTier(score: number): string {
   return "Possible";
 }
 
+function formatRank(name: string | null, division: string | null): string | null {
+  if (!name && !division) return null;
+  if (name && division) return `${name} ${division}`;
+  return name ?? division;
+}
+
 type TMatchPlayer = {
   ign: string;
   legend: string | null;
@@ -123,7 +129,10 @@ function clusterMatchesFromEdges(edges: TPartyMatchEdge[]): TPartyMatch[] {
           ign: edge.ignA,
           legend: edge.legendA,
           rpDelta: edge.rpDeltaA,
-          rank: edge.rankA,
+          rank: formatRank(
+            edge.closingRankNameA ?? edge.openingRankNameA,
+            edge.closingRankDivisionA ?? edge.openingRankDivisionA,
+          ),
           segmentId: edge.segmentIdA,
           segStart: edge.segStartA,
           segEnd: edge.segEndA,
@@ -135,7 +144,10 @@ function clusterMatchesFromEdges(edges: TPartyMatchEdge[]): TPartyMatch[] {
           ign: edge.ignB,
           legend: edge.legendB,
           rpDelta: edge.rpDeltaB,
-          rank: edge.rankB,
+          rank: formatRank(
+            edge.closingRankNameB ?? edge.openingRankNameB,
+            edge.closingRankDivisionB ?? edge.openingRankDivisionB,
+          ),
           segmentId: edge.segmentIdB,
           segStart: edge.segStartB,
           segEnd: edge.segEndB,
