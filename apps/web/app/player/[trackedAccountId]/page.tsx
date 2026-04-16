@@ -62,6 +62,11 @@ import { clusterMatchesFromEdges, serializePartyMatches } from "@/lib/party-matc
 import { cn } from "@/lib/utils";
 
 export const revalidate = 60;
+export const dynamicParams = true;
+
+export async function generateStaticParams() {
+  return [];
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
