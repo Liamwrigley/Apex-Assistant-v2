@@ -19,7 +19,9 @@ export async function GET(request: Request): Promise<NextResponse> {
       players: trackedIds.length
     });
 
-    return NextResponse.json(timelines);
+    return NextResponse.json(timelines, {
+      headers: { "Cache-Control": "public, s-maxage=120, stale-while-revalidate=240" },
+    });
   } catch (error) {
     debugLog("leaderboard-timelines", "error", { message: error instanceof Error ? error.message : "Unknown error" });
     return toApiError(error);

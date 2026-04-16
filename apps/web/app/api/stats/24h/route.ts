@@ -13,7 +13,9 @@ export async function GET(request: Request): Promise<NextResponse> {
       highestGainer: movers.highestGainer?.ign ?? null,
       biggestLoser: movers.biggestLoser?.ign ?? null
     });
-    return NextResponse.json(movers);
+    return NextResponse.json(movers, {
+      headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" },
+    });
   } catch (error) {
     debugLog("stats-24h", "error", { message: error instanceof Error ? error.message : "Unknown error" });
     return toApiError(error);

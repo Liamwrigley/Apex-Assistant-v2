@@ -22,7 +22,10 @@ export async function GET(request: Request): Promise<NextResponse> {
     debugLog("leaderboard", "rows loaded", { guildId, count: rows.length });
     return NextResponse.json(
       rows.sort((a, b) => b.rankScore - a.rankScore),
-      { status: 200 }
+      {
+        status: 200,
+        headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" },
+      },
     );
   } catch (error) {
     debugLog("leaderboard", "error", { message: error instanceof Error ? error.message : "Unknown error" });

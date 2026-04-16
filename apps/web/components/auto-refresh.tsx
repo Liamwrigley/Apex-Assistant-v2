@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useEffect, useRef } from "react";
 
 type TAutoRefreshProps = {
+  /** Polling interval in ms. Set to 0 to disable the periodic timer (focus/visibility only). */
   intervalMs?: number;
 };
 
@@ -15,7 +16,6 @@ export function AutoRefresh(props: TAutoRefreshProps) {
   useEffect(() => {
     function maybeRefresh() {
       const now = Date.now();
-      // Avoid duplicate refreshes when focus + visibility fire together.
       if (now - lastRefreshRef.current < 2_000) {
         return;
       }
@@ -33,11 +33,16 @@ export function AutoRefresh(props: TAutoRefreshProps) {
       }
     }
 
-    const timer = window.setInterval(maybeRefresh, intervalMs);
+    const timer =
+      intervalMs > 0
+        ? window.setInterval(maybeRefresh, intervalMs)
+        : undefined;
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      window.clearInterval(timer);
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+      }
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };

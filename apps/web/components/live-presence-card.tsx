@@ -1,9 +1,15 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { PendingLink } from "@/components/pending-link";
-import { evaluateRealtimePresence } from "@/lib/realtime-presence";
+import {
+  computeRankScoreDelta,
+  RpDeltaBadge,
+} from "@/components/rp-delta-badge";
 import { formatDurationMs } from "@/lib/format-duration";
-import { computeRankScoreDelta, RpDeltaBadge } from "@/components/rp-delta-badge";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
 import { getRankIconUrl } from "@/lib/rank-icon-url";
+import { evaluateRealtimePresence } from "@/lib/realtime-presence";
 import { cn } from "@/lib/utils";
 
 export type TLivePresenceCardRow = {
@@ -47,13 +53,13 @@ function isOfflineLikeStateLabel(text: string | null | undefined): boolean {
   if (!text?.trim()) return false;
   const t = text.trim().toLowerCase();
   return ["offline", "afk", "disconnected", "not online"].some((frag) =>
-    t.includes(frag)
+    t.includes(frag),
   );
 }
 
 const glassPanelClass = cn(
   "rounded-lg border border-white/15 shadow-lg",
-  "bg-background/78 backdrop-blur-md supports-[backdrop-filter]:bg-background/65"
+  "bg-background/78 backdrop-blur-md supports-[backdrop-filter]:bg-background/65",
 );
 
 function InlineRankSnap(props: {
@@ -74,7 +80,11 @@ function InlineRankSnap(props: {
       </div>
       <div className="mt-0.5 flex items-center gap-1.5">
         {iconUrl ? (
-          <img src={iconUrl} alt="" className="h-7 w-7 shrink-0 object-contain" />
+          <img
+            src={iconUrl}
+            alt=""
+            className="h-7 w-7 shrink-0 object-contain"
+          />
         ) : null}
         <div className="min-w-0 leading-tight">
           <div className="truncate text-[10px] font-medium text-foreground">
@@ -92,18 +102,24 @@ function InlineRankSnap(props: {
 export function LivePresenceCard(props: {
   row: TLivePresenceCardRow;
   session: TLivePresenceSessionProps;
-  nowMs: number;
 }) {
-  const { row, session, nowMs } = props;
+  const { row, session } = props;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 15_000);
+    return () => window.clearInterval(id);
+  }, []);
   const legendIconUrl = getLegendIconUrl(row.realtimeSelectedLegend);
-  const heroIconUrl = legendIconUrl ?? getRankIconUrl(row.currentRankName, row.currentRankDivision);
+  const heroIconUrl =
+    legendIconUrl ??
+    getRankIconUrl(row.currentRankName, row.currentRankDivision);
 
   const evaluation = evaluateRealtimePresence({
     realtimeUpdatedAt: row.realtimeUpdatedAt,
     realtimeIsOnline: row.realtimeIsOnline,
     realtimeIsInGame: row.realtimeIsInGame,
     realtimeCurrentState: row.realtimeCurrentState,
-    realtimeCurrentStateAsText: row.realtimeCurrentStateAsText
+    realtimeCurrentStateAsText: row.realtimeCurrentStateAsText,
   });
   const showInGame = evaluation.status === "in_game";
 
@@ -112,7 +128,9 @@ export function LivePresenceCard(props: {
       ? nowMs - new Date(session.gameStartedAt).getTime()
       : null;
   const gameElapsedLabel =
-    gameElapsedMs !== null && gameElapsedMs > 0 && gameElapsedMs < 24 * 60 * 60 * 1000
+    gameElapsedMs !== null &&
+    gameElapsedMs > 0 &&
+    gameElapsedMs < 24 * 60 * 60 * 1000
       ? formatDurationMs(gameElapsedMs)
       : null;
 

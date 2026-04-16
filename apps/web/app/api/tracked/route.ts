@@ -10,7 +10,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     debugLog("tracked", "request", { guildId: guildId ?? null });
     const tracked = await listTrackedAccounts(guildId ?? undefined);
     debugLog("tracked", "rows loaded", { guildId, count: tracked.length });
-    return NextResponse.json(tracked);
+    return NextResponse.json(tracked, {
+      headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60" },
+    });
   } catch (error) {
     debugLog("tracked", "error", { message: error instanceof Error ? error.message : "Unknown error" });
     return toApiError(error);

@@ -61,7 +61,7 @@ import {
 import { clusterMatchesFromEdges, serializePartyMatches } from "@/lib/party-matches";
 import { cn } from "@/lib/utils";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -293,7 +293,7 @@ export default async function PlayerProfilePage(props: {
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <AutoRefresh intervalMs={60_000} />
+      <AutoRefresh intervalMs={0} />
 
       <PlayerProfileRangeProvider
         trackedAccountId={trackedAccountId}
