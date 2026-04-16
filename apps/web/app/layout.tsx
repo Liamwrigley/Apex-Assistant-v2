@@ -1,8 +1,8 @@
-import { type ReactNode, Suspense } from "react";
+import { type ReactNode } from "react";
 import "./globals.css";
 import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
-import { SiteHeader, SiteHeaderFallback } from "@/components/site-header";
+import { SiteHeader } from "@/components/site-header";
 import { QueryProvider } from "@/components/query-provider";
 import type { Metadata } from "next";
 
@@ -23,9 +23,7 @@ export default function RootLayout(props: { children: ReactNode }) {
       <body className="min-h-full antialiased">
         <QueryProvider>
           <div className="mx-auto w-full max-w-6xl px-6 pt-6">
-            <Suspense fallback={<SiteHeaderFallback />}>
-              <SiteHeader />
-            </Suspense>
+            <SiteHeader />
           </div>
           {props.children}
         </QueryProvider>

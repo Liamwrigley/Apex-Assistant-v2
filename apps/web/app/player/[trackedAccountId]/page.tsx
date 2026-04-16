@@ -134,18 +134,15 @@ function offlinePresenceSubtitle(
 
 export default async function PlayerProfilePage(props: {
   params: Promise<{ trackedAccountId: string }>;
-  searchParams: Promise<{ range?: string }>;
 }) {
   const params = await props.params;
-  const searchParams = await props.searchParams;
   const { trackedAccountId } = params;
 
   if (!UUID_RE.test(trackedAccountId)) {
     notFound();
   }
 
-  const rawRange = searchParams.range ?? "7d";
-  const rangeKey = rawRange in HOUR_OPTIONS ? rawRange : "7d";
+  const rangeKey = "7d";
   const hours = HOUR_OPTIONS[rangeKey];
 
   const account = await getTrackedAccountById(trackedAccountId);

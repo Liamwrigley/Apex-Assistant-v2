@@ -37,6 +37,7 @@ export function PendingLink(props: TPendingLinkProps) {
   );
   return (
     <Link
+      prefetch={false}
       {...rest}
       className={cn("inline-flex max-w-full min-w-0 items-center gap-1.5", className)}
     >
