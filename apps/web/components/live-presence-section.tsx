@@ -7,25 +7,26 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  LivePresenceCard,
-  type TLivePresenceCardRow,
-} from "@/components/live-presence-card";
+import { LivePresenceCard } from "@/components/live-presence-card";
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
 import { getTeamIdentity } from "@/lib/team-name";
 import { cn } from "@/lib/utils";
-import {
-  usePresence,
-  type TPresencePayload,
-  type TPresenceTrackedRow,
-} from "@/hooks/use-presence";
+import type {
+  TDashboardLiveOpenSession,
+  TDashboardLivePresenceRow,
+} from "@/lib/dashboard-live";
 
-type TLivePresenceSectionProps = {
-  initialData: TPresencePayload;
-  guildId?: string;
+export type TLivePresenceSectionData = {
+  tracked: TDashboardLivePresenceRow[];
+  openSessionByTrackedId: Record<string, TDashboardLiveOpenSession>;
+  partyGroups: string[][];
 };
 
-function presenceDedupeKey(row: TPresenceTrackedRow): string {
+type TLivePresenceSectionProps = {
+  data: TLivePresenceSectionData;
+};
+
+function presenceDedupeKey(row: TDashboardLivePresenceRow): string {
   if (row.identityGroupId) {
     return `gid:${row.identityGroupId}`;
   }
@@ -33,8 +34,7 @@ function presenceDedupeKey(row: TPresenceTrackedRow): string {
 }
 
 export function LivePresenceSection(props: TLivePresenceSectionProps) {
-  const { data } = usePresence(props.initialData, props.guildId);
-  const { tracked, openSessionByTrackedId, partyGroups } = data;
+  const { tracked, openSessionByTrackedId, partyGroups } = props.data;
 
   const seenPresenceGroups = new Set<string>();
   const informativeRealtimeRows = tracked
@@ -90,7 +90,7 @@ export function LivePresenceSection(props: TLivePresenceSectionProps) {
           const team = getTeamIdentity(groupIds);
           const members = groupIds
             .map((id) => rowById.get(id))
-            .filter(Boolean) as TPresenceTrackedRow[];
+            .filter(Boolean) as TDashboardLivePresenceRow[];
           return (
             <div key={groupIds.join(",")} className="space-y-2">
               <div
