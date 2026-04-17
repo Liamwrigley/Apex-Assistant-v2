@@ -13,9 +13,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ToggleGroup } from "@/components/ui/toggle-group";
 import type { TDashboardLiveRecentGameCell } from "@/lib/dashboard-live";
 import type { TPartyMatchSerialized } from "@/lib/party-matches";
-import { cn } from "@/lib/utils";
 
 type TLeaderboardRow = {
   trackedAccountId: string;
@@ -97,38 +97,3 @@ export function LeaderboardCard(props: {
   );
 }
 
-/**
- * Small segmented-control used in the leaderboard header. Generic over its
- * value type so the same visual treatment drives both the sparkline/matches
- * toggle and the RP delta window toggle.
- */
-function ToggleGroup<T extends string>(props: {
-  value: T;
-  onChange: (next: T) => void;
-  options: ReadonlyArray<{ value: T; label: string }>;
-  ariaLabel: string;
-}) {
-  return (
-    <div
-      role="group"
-      aria-label={props.ariaLabel}
-      className="flex items-center gap-1 rounded-md border p-0.5"
-    >
-      {props.options.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          onClick={() => props.onChange(opt.value)}
-          className={cn(
-            "rounded px-2.5 py-1 text-xs font-medium transition-colors",
-            props.value === opt.value
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted",
-          )}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  );
-}

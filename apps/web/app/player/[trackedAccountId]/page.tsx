@@ -63,7 +63,8 @@ import {
   mapOpenSessionsToRecentSessionRows,
   mapSessionsToRecentSessionRows,
 } from "@/lib/recent-session-rows";
-import { clusterMatchesFromEdges, serializePartyMatches } from "@/lib/party-matches";
+import { serializePartyMatches } from "@/lib/party-matches";
+import { buildAllMatchesFromEdgesAndSegments } from "@/lib/party-matches-server";
 import { cn } from "@/lib/utils";
 
 export const revalidate = 60;
@@ -286,7 +287,15 @@ export default async function PlayerProfilePage(props: {
     trackerObsByAccount
   );
   const recentSessionRows = [...activeSessionRows, ...completedSessionRows];
-  const partyMatches = serializePartyMatches(clusterMatchesFromEdges(matchEdges));
+  const allSegments = Object.values(segmentsBySession).flat();
+  const ignByTrackedAccountId = new Map([[trackedAccountId, account.ign]]);
+  const matches = serializePartyMatches(
+    buildAllMatchesFromEdgesAndSegments(
+      matchEdges,
+      allSegments,
+      ignByTrackedAccountId,
+    ),
+  );
 
   const lastSeenLegendUrl = lastSeenLegendIconUrl;
 
@@ -538,7 +547,7 @@ export default async function PlayerProfilePage(props: {
 
       <RecentSessionsSection
         rows={recentSessionRows}
-        partyMatches={partyMatches}
+        matches={matches}
         hidePlayerColumn
         titleSuffix={
           <span className="text-muted-foreground text-xs font-normal">

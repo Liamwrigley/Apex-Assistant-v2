@@ -15,7 +15,6 @@ import {
   type TSessionRankSnap,
 } from "@/components/session-rank-snap";
 import type { TSegmentRow } from "@/components/session-segment-types";
-import { SessionGamesSummary } from "@/components/session-segments-list";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -48,20 +47,6 @@ export type {
   TEstimatedGame,
   TRecentSessionRow,
 } from "@/components/recent-sessions-types";
-
-function platformChipLabel(platform: string): string {
-  const value = platform.toLowerCase();
-  if (value === "origin" || value === "pc") {
-    return "PC";
-  }
-  if (value === "psn" || value === "ps4") {
-    return "PS";
-  }
-  if (value === "xbl" || value === "x1") {
-    return "XBOX";
-  }
-  return platform.toUpperCase();
-}
 
 function toSnap(
   score: number | null,
@@ -111,17 +96,24 @@ const INITIAL_VISIBLE_COUNT = 10;
 const LOAD_MORE_COUNT = 10;
 
 type TView = "sessions" | "matches";
+type TMatchFilter = "all" | "party" | "solo";
 
-const DEFAULT_TITLE = "Recent sessions";
-const MATCHES_TITLE = "Party match history";
+const DEFAULT_TITLE = "Session history";
+const MATCHES_TITLE = "Match history";
 const DEFAULT_DESCRIPTION =
   "In-progress sessions appear at the top with a live indicator. Completed sessions show rank at start vs end, RP change, and legends while active. Click a row for details.";
 const MATCHES_DESCRIPTION =
-  "Games reconstructed from correlated segment edges. Shows who played together and individual RP changes.";
+  "Individual games reconstructed from tracked segments. Party matches show correlated teammates and individual RP changes; solo entries are standalone games.";
 
 export type RecentSessionsSectionProps = {
   rows: TRecentSessionRow[];
-  partyMatches?: TPartyMatchSerialized[];
+  /**
+   * Full match history. Each entry is either a party cluster (2+ players
+   * correlated via segment edges) or a solo game (single player). The
+   * component exposes an All / Party / Solo filter in the match view so the
+   * same prop can power every match-history surface in the app.
+   */
+  matches?: TPartyMatchSerialized[];
   title?: string;
   description?: string;
   /**
@@ -144,8 +136,10 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
   const showAllSessions = props.showAllSessions ?? false;
   const colCount = hidePlayerColumn ? 7 : 8;
 
-  const hasPartyData = (props.partyMatches ?? []).length > 0;
+  const allMatches = props.matches ?? [];
+  const hasMatchData = allMatches.length > 0;
   const [view, setView] = useState<TView>("sessions");
+  const [matchFilter, setMatchFilter] = useState<TMatchFilter>("party");
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     null,
@@ -153,7 +147,7 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
 
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE_COUNT);
-  }, [view]);
+  }, [view, matchFilter]);
 
   const title =
     view === "sessions" ? (props.title ?? DEFAULT_TITLE) : MATCHES_TITLE;
@@ -161,6 +155,13 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
     view === "sessions"
       ? (props.description ?? DEFAULT_DESCRIPTION)
       : MATCHES_DESCRIPTION;
+
+  const filteredMatches = useMemo(() => {
+    if (matchFilter === "all") return allMatches;
+    if (matchFilter === "party")
+      return allMatches.filter((m) => m.players.length > 1);
+    return allMatches.filter((m) => m.players.length === 1);
+  }, [allMatches, matchFilter]);
 
   const { visibleRows, hasMore } = useMemo(() => {
     const rows = props.rows;
@@ -178,20 +179,19 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
   }, [props.rows, visibleCount, showAllSessions]);
 
   const { visibleMatches, hasMoreMatches } = useMemo(() => {
-    const matches = props.partyMatches ?? [];
-    if (matches.length === 0)
+    if (filteredMatches.length === 0)
       return {
         visibleMatches: [] as TPartyMatchSerialized[],
         hasMoreMatches: false,
       };
     if (showAllSessions)
-      return { visibleMatches: matches, hasMoreMatches: false };
-    const visible = matches.slice(0, visibleCount);
+      return { visibleMatches: filteredMatches, hasMoreMatches: false };
+    const visible = filteredMatches.slice(0, visibleCount);
     return {
       visibleMatches: visible,
-      hasMoreMatches: visible.length < matches.length,
+      hasMoreMatches: visible.length < filteredMatches.length,
     };
-  }, [props.partyMatches, visibleCount, showAllSessions]);
+  }, [filteredMatches, visibleCount, showAllSessions]);
 
   const selectedRow = useMemo(
     () => props.rows.find((r) => r.sessionId === selectedSessionId) ?? null,
@@ -212,7 +212,7 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
   }, [modalOpen, clearSelection]);
 
   const totalCount =
-    view === "sessions" ? props.rows.length : (props.partyMatches ?? []).length;
+    view === "sessions" ? props.rows.length : filteredMatches.length;
   const currentVisibleCount =
     view === "sessions" ? visibleRows.length : visibleMatches.length;
   const currentHasMore = view === "sessions" ? hasMore : hasMoreMatches;
@@ -228,7 +228,7 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
       title
     );
 
-  if (props.rows.length === 0 && (props.partyMatches ?? []).length === 0) {
+  if (props.rows.length === 0 && allMatches.length === 0) {
     if (props.emptyCardContent == null) {
       return null;
     }
@@ -251,32 +251,67 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
             <CardTitle>{renderTitle()}</CardTitle>
             <CardDescription className="mt-1">{description}</CardDescription>
           </div>
-          {hasPartyData ? (
-            <div className="flex shrink-0 items-center gap-1 rounded-md border p-0.5">
-              <button
-                type="button"
-                onClick={() => setView("sessions")}
-                className={cn(
-                  "rounded px-2.5 py-1 text-xs font-medium transition-colors",
-                  view === "sessions"
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
-                )}
+          {hasMatchData ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {view === "matches" ? (
+                <div
+                  className="flex items-center gap-1 rounded-md border p-0.5"
+                  role="group"
+                  aria-label="Match filter"
+                >
+                  {(
+                    [
+                      { id: "all", label: "All" },
+                      { id: "party", label: "Party" },
+                      { id: "solo", label: "Solo" },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setMatchFilter(opt.id)}
+                      className={cn(
+                        "rounded px-2.5 py-1 text-xs font-medium transition-colors",
+                        matchFilter === opt.id
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <div
+                className="flex items-center gap-1 rounded-md border p-0.5"
+                role="group"
+                aria-label="History view"
               >
-                Sessions
-              </button>
-              <button
-                type="button"
-                onClick={() => setView("matches")}
-                className={cn(
-                  "rounded px-2.5 py-1 text-xs font-medium transition-colors",
-                  view === "matches"
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
-                )}
-              >
-                Party matches
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setView("sessions")}
+                  className={cn(
+                    "rounded px-2.5 py-1 text-xs font-medium transition-colors",
+                    view === "sessions"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                  )}
+                >
+                  Session history
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView("matches")}
+                  className={cn(
+                    "rounded px-2.5 py-1 text-xs font-medium transition-colors",
+                    view === "matches"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                  )}
+                >
+                  Match history
+                </button>
+              </div>
             </div>
           ) : null}
         </div>
@@ -299,8 +334,8 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
                     <th className="px-2 py-2 font-medium">Start</th>
                     <th className="px-2 py-2 font-medium">End</th>
                     <th className="px-2 py-2 font-medium">RP Δ</th>
+                    <th className="px-2 py-2 font-medium">Games</th>
                     <th className="px-2 py-2 font-medium">Legends</th>
-                    <th className="px-2 py-2 font-medium">Est. games</th>
                     <th className="px-2 py-2 font-medium">Duration</th>
                     <th className="px-2 py-2 text-right font-medium">
                       Finished
@@ -369,11 +404,11 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
                         )}
                       >
                         {hidePlayerColumn ? null : (
-                          <td className="px-2 py-2 align-top">
-                            <div className="flex items-start gap-2">
+                          <td className="px-2 py-2 align-middle">
+                            <div className="flex items-center gap-2">
                               {row.isActiveSession ? (
                                 <span
-                                  className="mt-1.5 h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.55)]"
+                                  className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.55)]"
                                   title="Session in progress"
                                   aria-hidden
                                 />
@@ -383,26 +418,25 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
                                   {row.trackedAccountId ? (
                                     <PendingLink
                                       href={`/player/${row.trackedAccountId}`}
-                                      className="font-medium hover:underline"
+                                      className="text-xs font-medium hover:underline"
                                     >
                                       {row.ign}
                                     </PendingLink>
                                   ) : (
-                                    <div className="font-medium">{row.ign}</div>
+                                    <div className="text-xs font-medium">
+                                      {row.ign}
+                                    </div>
                                   )}
                                 </div>
-                                <span className="text-muted-foreground mt-0.5 inline-block rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] text-violet-300">
-                                  {platformChipLabel(row.platform)}
-                                </span>
                               </div>
                             </div>
                           </td>
                         )}
-                        <td className="px-2 py-2 align-top">
-                          <div className="flex items-start gap-2">
+                        <td className="px-2 py-2 align-middle">
+                          <div className="flex items-center gap-2">
                             {row.isActiveSession && hidePlayerColumn ? (
                               <span
-                                className="mt-1.5 h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.55)]"
+                                className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.55)]"
                                 title="Session in progress"
                                 aria-hidden
                               />
@@ -410,17 +444,55 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
                             <SessionRankSnap snap={startSnap} compact />
                           </div>
                         </td>
-                        <td className="px-2 py-2 align-top">
+                        <td className="px-2 py-2 align-middle">
                           <SessionRankSnap snap={endSnap} compact />
                         </td>
                         <td className="px-2 py-2 align-middle">
                           <RpDeltaBadge delta={rpDelta} />
                         </td>
                         <td className="px-2 py-2 align-middle">
+                          {segments.length > 0 ? (
+                            <div className="text-muted-foreground flex flex-col text-xs leading-tight tabular-nums">
+                              <span>
+                                {segments.length} game{segments.length === 1 ? "" : "s"}
+                              </span>
+                              {(() => {
+                                let wins = 0;
+                                let losses = 0;
+                                for (const s of segments) {
+                                  if (s.rpDelta != null) {
+                                    if (s.rpDelta > 0) wins++;
+                                    else if (s.rpDelta < 0) losses++;
+                                  }
+                                }
+                                if (wins === 0 && losses === 0) return null;
+                                return (
+                                  <span>
+                                    <span className="text-emerald-300">
+                                      {wins}W
+                                    </span>
+                                    <span className="mx-1">·</span>
+                                    <span className="text-rose-300">
+                                      {losses}L
+                                    </span>
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 align-middle">
                           {row.legends.length === 0 ? (
                             <span className="text-muted-foreground">—</span>
                           ) : (
-                            <div className="flex flex-wrap items-center gap-1">
+                            /* Fixed 3-column grid so chips always break to a
+                               new row after the third one. `max-content`
+                               tracks keep each cell only as wide as its
+                               chip, so short legend names don't stretch out
+                               into awkward whitespace. */
+                            <div className="grid w-fit grid-cols-[repeat(3,max-content)] items-center gap-1">
                               {row.legends.map((name) => {
                                 const iconUrl = getLegendIconUrl(name);
                                 return (
@@ -445,15 +517,7 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
                             </div>
                           )}
                         </td>
-                        <td className="px-2 py-2 align-middle">
-                          <div className="inline-flex items-center gap-1 rounded border border-border/40 bg-muted/20 px-2 py-1">
-                            <SessionGamesSummary
-                              segments={segments}
-                              showDetailHint
-                            />
-                          </div>
-                        </td>
-                        <td className="text-muted-foreground px-2 py-2 align-middle tabular-nums">
+                        <td className="text-muted-foreground px-2 py-2 align-middle text-xs tabular-nums">
                           {formatDurationMs(durationMs)}
                         </td>
                         <td className="text-muted-foreground px-2 py-2 text-right align-middle text-xs">
@@ -466,7 +530,7 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
                               In progress
                             </span>
                           ) : row.endedAt ? (
-                            <>Finished {formatRelativeTime(row.endedAt)}</>
+                            <>{formatRelativeTime(row.endedAt)}</>
                           ) : (
                             "—"
                           )}
@@ -543,8 +607,7 @@ function PartyMatchesView(props: { matches: TPartyMatchSerialized[] }) {
   if (matches.length === 0) {
     return (
       <p className="text-muted-foreground py-6 text-center text-sm">
-        No party matches found. Matches appear when multiple tracked
-        players&apos; game segments correlate.
+        No matches found for the selected filter.
       </p>
     );
   }
@@ -553,14 +616,27 @@ function PartyMatchesView(props: { matches: TPartyMatchSerialized[] }) {
     <div className="space-y-3">
       {matches.map((match, idx) => {
         const maxDuration = Math.max(...match.players.map((p) => p.duration));
-        const partyLabel = match.players.length >= 3 ? "Trios" : "Duos";
+        const isSolo = match.players.length === 1;
+        const partyLabel = isSolo
+          ? "Solo"
+          : match.players.length >= 3
+            ? "Trios"
+            : "Duos";
+        const labelClass = isSolo
+          ? "bg-slate-500/15 text-slate-300"
+          : "bg-sky-500/15 text-sky-300";
 
         return (
           <div key={idx} className="border-border/40 rounded-lg border p-3">
             <div className="mb-2 flex items-start justify-between gap-2">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                 <span className="font-medium">{fmtDateTime(match.time)}</span>
-                <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">
+                <span
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[10px] font-medium",
+                    labelClass,
+                  )}
+                >
                   {partyLabel}
                 </span>
                 {match.map && (
@@ -572,15 +648,17 @@ function PartyMatchesView(props: { matches: TPartyMatchSerialized[] }) {
                   {formatDurationMs(maxDuration * 1000)}
                 </span>
               </div>
-              <span
-                className={cn(
-                  "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
-                  confidenceBg(match.avgScore),
-                )}
-                title={`Matching score: ${match.avgScore.toFixed(3)}`}
-              >
-                {confidenceLabel(match.avgScore)}
-              </span>
+              {isSolo ? null : (
+                <span
+                  className={cn(
+                    "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
+                    confidenceBg(match.avgScore),
+                  )}
+                  title={`Matching score: ${match.avgScore.toFixed(3)}`}
+                >
+                  {confidenceLabel(match.avgScore)}
+                </span>
+              )}
             </div>
 
             <div className="overflow-x-auto">

@@ -6,6 +6,7 @@ import {
   serializePartyMatches,
   type TPartyMatchSerialized,
 } from "@/lib/party-matches";
+import { buildAllMatchesFromEdgesAndSegments } from "@/lib/party-matches-server";
 import {
   buildGranularSnapshotsByAccount,
   buildTrackerObsByAccount,
@@ -71,6 +72,7 @@ function toIso(d: Date | string): string {
 async function loadDashboardStatic(guildFilter: string | undefined): Promise<{
   timelines: Record<string, Array<{ capturedAt: string; rankScore: number }>>;
   partyMatches: TPartyMatchSerialized[];
+  matches: TPartyMatchSerialized[];
   completedRecentSessions: TRecentSessionRow[];
   trackedByOwner: Record<string, TTrackedOwnerRow[]>;
 }> {
@@ -119,6 +121,18 @@ async function loadDashboardStatic(guildFilter: string | undefined): Promise<{
     clusterMatchesFromEdges(matchEdges),
   );
 
+  const ignByTrackedAccountId = new Map(
+    trackedAccounts.map((a) => [a.id, a.ign]),
+  );
+  const allSegments = Object.values(segmentsBySession).flat();
+  const matches = serializePartyMatches(
+    buildAllMatchesFromEdgesAndSegments(
+      matchEdges,
+      allSegments,
+      ignByTrackedAccountId,
+    ),
+  );
+
   const tracked: TTrackedOwnerRow[] = trackedAccounts.map((row) => ({
     id: row.id,
     identityGroupId: row.identityGroupId ?? null,
@@ -159,7 +173,13 @@ async function loadDashboardStatic(guildFilter: string | undefined): Promise<{
     {} as Record<string, TTrackedOwnerRow[]>,
   );
 
-  return { timelines, partyMatches, completedRecentSessions, trackedByOwner };
+  return {
+    timelines,
+    partyMatches,
+    matches,
+    completedRecentSessions,
+    trackedByOwner,
+  };
 }
 
 export default async function HomePage() {
@@ -187,6 +207,7 @@ export default async function HomePage() {
       initialLive={initialLive}
       timelines={staticData.timelines}
       partyMatches={staticData.partyMatches}
+      matches={staticData.matches}
       completedRecentSessions={staticData.completedRecentSessions}
       trackedByOwner={staticData.trackedByOwner}
     />

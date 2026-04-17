@@ -138,7 +138,7 @@ export default function HomeLoading() {
       {/* RecentSessionsSection */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent sessions</CardTitle>
+          <CardTitle>Session history</CardTitle>
           <CardDescription>
             In-progress sessions appear at the top with a live indicator.
             Completed sessions show rank at start vs end, RP change, and legends

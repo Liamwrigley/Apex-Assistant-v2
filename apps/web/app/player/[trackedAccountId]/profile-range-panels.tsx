@@ -15,6 +15,7 @@ import {
 } from "@/components/leaderboard-match-grid";
 import { PlayerTimelineSparkline } from "@/components/player-timeline-sparkline";
 import { RpDeltaBadge } from "@/components/rp-delta-badge";
+import { formatDurationMs } from "@/lib/format-duration";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
 import type { TDashboardLiveRecentGameCell } from "@/lib/dashboard-live";
@@ -394,9 +395,9 @@ export function PlayerProfileRangeTimelineTables(props: { trackedAccountId: stri
                     <th className="px-2 py-2 font-medium text-right">Games</th>
                     <th className="px-2 py-2 font-medium text-right">Total RP</th>
                     <th className="px-2 py-2 font-medium text-right">Avg RP</th>
-                    <th className="px-2 py-2 font-medium text-right">Avg Kills</th>
-                    <th className="px-2 py-2 font-medium text-right">Avg Dmg</th>
-                    <th className="px-2 py-2 font-medium text-right">+ve / -ve</th>
+                    <th className="px-2 py-2 font-medium text-right">Total Time</th>
+                    <th className="px-2 py-2 font-medium text-right">Avg Time</th>
+                    <th className="px-2 py-2 font-medium text-right">W / L</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -420,13 +421,13 @@ export function PlayerProfileRangeTimelineTables(props: { trackedAccountId: stri
                           <RpDeltaBadge delta={row.avgRpDelta} decimals={1} />
                         </td>
                         <td className="px-2 py-2 text-right tabular-nums">
-                          {row.totalKills > 0 ? row.avgKills : <span className="text-muted-foreground">—</span>}
+                          <DurationCell seconds={row.totalDurationSec} />
                         </td>
                         <td className="px-2 py-2 text-right tabular-nums">
-                          {row.totalDamage > 0 ? row.avgDamage.toLocaleString() : <span className="text-muted-foreground">—</span>}
+                          <DurationCell seconds={row.avgDurationSec} />
                         </td>
-                        <td className="text-muted-foreground px-2 py-2 text-right tabular-nums">
-                          {row.wins} / {row.losses}
+                        <td className="px-2 py-2 text-right tabular-nums">
+                          <WinLossCell wins={row.wins} losses={row.losses} />
                         </td>
                       </tr>
                     );
@@ -1007,6 +1008,38 @@ export function PlayerProfileMatchHistory() {
   );
 }
 
+/** Render a duration aggregate (in seconds) using the shared formatter.
+ *  Mirrors the recent-sessions table styling: small, muted, tabular nums.
+ *  node-pg may surface numeric/float values as strings depending on the OID,
+ *  so we coerce defensively here too. */
+function DurationCell(props: { seconds: number | string | null | undefined }) {
+  const raw = props.seconds;
+  const num = typeof raw === "string" ? Number(raw) : (raw ?? 0);
+  if (!Number.isFinite(num) || num <= 0) {
+    return <span className="text-muted-foreground text-xs">—</span>;
+  }
+  return (
+    <span className="text-muted-foreground text-xs tabular-nums">
+      {formatDurationMs(num * 1000)}
+    </span>
+  );
+}
+
+/** Color-coded `NW · NL` pair, matching the recent-sessions table:
+ *  emerald-300 wins, rose-300 losses, muted `·` divider, small text. */
+function WinLossCell(props: { wins: number; losses: number }) {
+  if (props.wins === 0 && props.losses === 0) {
+    return <span className="text-muted-foreground text-xs">—</span>;
+  }
+  return (
+    <span className="text-muted-foreground text-xs leading-tight tabular-nums">
+      <span className="text-emerald-300">{props.wins}W</span>
+      <span className="mx-1">·</span>
+      <span className="text-rose-300">{props.losses}L</span>
+    </span>
+  );
+}
+
 type TMapSortField = "games" | "totalRpDelta" | "avgRpDelta";
 
 function MapPerformanceCard(props: { rangeLoading: boolean }) {
@@ -1125,7 +1158,12 @@ function MapPerformanceCard(props: { rangeLoading: boolean }) {
   );
 }
 
-type TLegendSortField = "games" | "totalRpDelta" | "avgRpDelta" | "avgKills" | "avgDamage";
+type TLegendSortField =
+  | "games"
+  | "totalRpDelta"
+  | "avgRpDelta"
+  | "totalDurationSec"
+  | "avgDurationSec";
 
 function MapRow(props: {
   mapName: string;
@@ -1214,17 +1252,17 @@ function MapRow(props: {
                     </th>
                     <th
                       className="px-2 py-1.5 font-medium text-right cursor-pointer select-none hover:text-foreground transition-colors"
-                      onClick={(e) => { e.stopPropagation(); handleLegendSort("avgKills"); }}
+                      onClick={(e) => { e.stopPropagation(); handleLegendSort("totalDurationSec"); }}
                     >
-                      Avg Kills{legendArrow("avgKills")}
+                      Total Time{legendArrow("totalDurationSec")}
                     </th>
                     <th
                       className="px-2 py-1.5 font-medium text-right cursor-pointer select-none hover:text-foreground transition-colors"
-                      onClick={(e) => { e.stopPropagation(); handleLegendSort("avgDamage"); }}
+                      onClick={(e) => { e.stopPropagation(); handleLegendSort("avgDurationSec"); }}
                     >
-                      Avg Dmg{legendArrow("avgDamage")}
+                      Avg Time{legendArrow("avgDurationSec")}
                     </th>
-                    <th className="px-2 py-1.5 font-medium text-right">+ve / -ve</th>
+                    <th className="px-2 py-1.5 font-medium text-right">W / L</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1248,13 +1286,13 @@ function MapRow(props: {
                           <RpDeltaBadge delta={leg.avgRpDelta} decimals={1} />
                         </td>
                         <td className="px-2 py-1.5 text-right tabular-nums">
-                          {leg.totalKills > 0 ? leg.avgKills : <span className="text-muted-foreground">—</span>}
+                          <DurationCell seconds={leg.totalDurationSec} />
                         </td>
                         <td className="px-2 py-1.5 text-right tabular-nums">
-                          {leg.totalDamage > 0 ? leg.avgDamage.toLocaleString() : <span className="text-muted-foreground">—</span>}
+                          <DurationCell seconds={leg.avgDurationSec} />
                         </td>
-                        <td className="text-muted-foreground px-2 py-1.5 text-right tabular-nums">
-                          {leg.wins} / {leg.losses}
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          <WinLossCell wins={leg.wins} losses={leg.losses} />
                         </td>
                       </tr>
                     );

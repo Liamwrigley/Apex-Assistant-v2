@@ -50,7 +50,13 @@ export type TDashboardClientProps = {
   guildId?: string;
   initialLive: TDashboardLivePayload;
   timelines: Record<string, TTimelinePoint[]>;
+  /** Party-only match clusters used by the leaderboard match-cell highlighter. */
   partyMatches: TPartyMatchSerialized[];
+  /**
+   * All matches (party clusters + solo segments) used by the match history
+   * card. Sorted newest first.
+   */
+  matches: TPartyMatchSerialized[];
   /** Completed sessions from SSR. Live active sessions are merged in on top. */
   completedRecentSessions: TRecentSessionRow[];
   trackedByOwner: Record<string, TTrackedOwnerRow[]>;
@@ -234,7 +240,7 @@ export function DashboardClient(props: TDashboardClientProps) {
 
       <RecentSessionsSection
         rows={recentSessions}
-        partyMatches={props.partyMatches}
+        matches={props.matches}
       />
 
       <Card>

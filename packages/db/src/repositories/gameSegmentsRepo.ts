@@ -342,6 +342,10 @@ export type TLegendAggregate = {
   totalDamage: number;
   avgKills: number;
   avgDamage: number;
+  /** Sum of (ended_at - started_at) across the segments, in seconds. */
+  totalDurationSec: number;
+  /** Average per-game duration, in seconds. */
+  avgDurationSec: number;
 };
 
 export async function getLegendAggregatesByAccount(
@@ -367,7 +371,9 @@ export async function getLegendAggregatesByAccount(
        )), 0)::int as "avgKills",
        coalesce(round(avg(closing_career_damage - opening_career_damage) filter (
          where opening_career_damage is not null and closing_career_damage is not null
-       )), 0)::int as "avgDamage"
+       )), 0)::int as "avgDamage",
+       coalesce(sum(extract(epoch from (ended_at - started_at))), 0)::float as "totalDurationSec",
+       coalesce(avg(extract(epoch from (ended_at - started_at))), 0)::float as "avgDurationSec"
      from inferred_game_segments
      where tracked_account_id = $1
        and ended_at is not null
@@ -429,6 +435,10 @@ export type TMapLegendAggregate = {
   totalDamage: number;
   avgKills: number;
   avgDamage: number;
+  /** Sum of (ended_at - started_at) across the segments, in seconds. */
+  totalDurationSec: number;
+  /** Average per-game duration, in seconds. */
+  avgDurationSec: number;
 };
 
 export async function getMapLegendAggregatesByAccount(
@@ -455,7 +465,9 @@ export async function getMapLegendAggregatesByAccount(
        )), 0)::int as "avgKills",
        coalesce(round(avg(closing_career_damage - opening_career_damage) filter (
          where opening_career_damage is not null and closing_career_damage is not null
-       )), 0)::int as "avgDamage"
+       )), 0)::int as "avgDamage",
+       coalesce(sum(extract(epoch from (ended_at - started_at))), 0)::float as "totalDurationSec",
+       coalesce(avg(extract(epoch from (ended_at - started_at))), 0)::float as "avgDurationSec"
      from inferred_game_segments
      where tracked_account_id = $1
        and ended_at is not null
