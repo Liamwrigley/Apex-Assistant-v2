@@ -2,9 +2,24 @@
 
 import { useMemo, useState } from "react";
 import { PendingLink } from "@/components/pending-link";
+import {
+  LeaderboardMatchGrid,
+} from "@/components/leaderboard-match-grid";
+import {
+  AvgCellContent,
+  RecordCellContent,
+  TopLegendCellContent,
+  computeMatchSummary,
+  type TMatchSummary,
+} from "@/components/leaderboard-match-summary";
 import { PlayerTimelineSparkline } from "@/components/player-timeline-sparkline";
 import { getRankIconUrl } from "@/lib/rank-icon-url";
 import { RpDeltaBadge } from "@/components/rp-delta-badge";
+import type { TDashboardLiveRecentGameCell } from "@/lib/dashboard-live";
+import {
+  buildSegmentPartyIndex,
+  type TPartyMatchSerialized,
+} from "@/lib/party-matches";
 
 type TLeaderboardRow = {
   trackedAccountId: string;
@@ -14,93 +29,54 @@ type TLeaderboardRow = {
   rankName: string;
   rankDivision: string | null;
   deltaRp24h: number | null;
+  deltaRp7d: number | null;
+  deltaRp30d: number | null;
+  ownerDisplayName: string | null;
 };
 type TTimelinePoint = { capturedAt: string; rankScore: number };
 
-type TSortKey = "ign" | "platform" | "rankName" | "rankScore" | "deltaRp24h";
-type TSortDir = "asc" | "desc";
-export type TPlatformFilter = "all" | "origin" | "psn" | "xbl";
+export type TLeaderboardViewMode = "sparkline" | "matches";
+export type TRpDeltaWindow = "24h" | "7d" | "30d";
 
-function sortIndicator(active: boolean, dir: TSortDir): string {
-  if (!active) {
-    return " ";
-  }
-  return dir === "asc" ? " \u2191" : " \u2193";
+const RP_DELTA_WINDOW_LABEL: Record<TRpDeltaWindow, string> = {
+  "24h": "24h",
+  "7d": "7d",
+  "30d": "30d",
+};
+
+function pickRpDelta(
+  row: {
+    deltaRp24h: number | null;
+    deltaRp7d: number | null;
+    deltaRp30d: number | null;
+  },
+  window: TRpDeltaWindow,
+): number | null {
+  if (window === "24h") return row.deltaRp24h;
+  if (window === "7d") return row.deltaRp7d;
+  return row.deltaRp30d;
 }
 
-export function toPlatformFilter(platform: string): TPlatformFilter {
-  const value = platform.toLowerCase();
-  if (value === "origin" || value === "pc") {
-    return "origin";
-  }
-  if (value === "psn" || value === "ps4") {
-    return "psn";
-  }
-  if (value === "xbl" || value === "x1") {
-    return "xbl";
-  }
-  return "all";
-}
-
-export function platformLabel(platform: string): string {
-  const normalized = toPlatformFilter(platform);
-  if (normalized === "origin") {
-    return "PC";
-  }
-  if (normalized === "psn") {
-    return "PS4";
-  }
-  if (normalized === "xbl") {
-    return "X1";
-  }
-  return platform.toUpperCase();
-}
+const EMPTY_HIGHLIGHTS: ReadonlySet<string> = new Set();
 
 export function LeaderboardTable(props: {
   rows: TLeaderboardRow[];
   timelines: Record<string, TTimelinePoint[]>;
-  platformFilter: TPlatformFilter;
+  viewMode: TLeaderboardViewMode;
+  rpDeltaWindow: TRpDeltaWindow;
+  recentGamesByTrackedAccountId: Record<string, TDashboardLiveRecentGameCell[]>;
+  partyMatches: TPartyMatchSerialized[];
 }) {
-  const [sortKey, setSortKey] = useState<TSortKey>("rankScore");
-  const [sortDir, setSortDir] = useState<TSortDir>("desc");
+  const [hoveredSegmentId, setHoveredSegmentId] = useState<string | null>(null);
 
-  function onSort(nextKey: TSortKey) {
-    if (sortKey === nextKey) {
-      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
-      return;
-    }
-    setSortKey(nextKey);
-    setSortDir(nextKey === "rankScore" ? "desc" : "asc");
-  }
-
+  /** Fixed descending by rank score — the only ordering that makes sense for a leaderboard. */
   const sortedRows = useMemo(() => {
-    const data = props.rows.filter((row) => {
-      if (props.platformFilter === "all") {
-        return true;
-      }
-      return toPlatformFilter(row.platform) === props.platformFilter;
-    });
-    data.sort((a, b) => {
-      const direction = sortDir === "asc" ? 1 : -1;
-      if (sortKey === "rankScore") {
-        return (a.rankScore - b.rankScore) * direction;
-      }
-      if (sortKey === "deltaRp24h") {
-        return ((a.deltaRp24h ?? -Infinity) - (b.deltaRp24h ?? -Infinity)) * direction;
-      }
-      if (sortKey === "ign") {
-        return a.ign.localeCompare(b.ign) * direction;
-      }
-      if (sortKey === "platform") {
-        return a.platform.localeCompare(b.platform) * direction;
-      }
-      return a.rankName.localeCompare(b.rankName) * direction;
-    });
-    return data;
-  }, [props.platformFilter, props.rows, sortDir, sortKey]);
+    return [...props.rows].sort((a, b) => b.rankScore - a.rankScore);
+  }, [props.rows]);
 
   /** One shared x-axis for all visible sparklines so the same wall time lines up row-to-row. */
   const timelineXDomain = useMemo(() => {
+    if (props.viewMode !== "sparkline") return null;
     let min = Infinity;
     let max = -Infinity;
     for (const row of sortedRows) {
@@ -120,99 +96,183 @@ export function LeaderboardTable(props: {
       return { minMs: min - 60_000, maxMs: max + 60_000 };
     }
     return { minMs: min, maxMs: max };
-  }, [props.timelines, sortedRows]);
+  }, [props.timelines, props.viewMode, sortedRows]);
+
+  const partyIndex = useMemo(
+    () =>
+      props.viewMode === "matches"
+        ? buildSegmentPartyIndex(props.partyMatches)
+        : null,
+    [props.partyMatches, props.viewMode],
+  );
+
+  const highlightedSegmentIds = useMemo<ReadonlySet<string>>(() => {
+    if (!hoveredSegmentId || !partyIndex) return EMPTY_HIGHLIGHTS;
+    const entry = partyIndex.get(hoveredSegmentId);
+    if (!entry) return EMPTY_HIGHLIGHTS;
+    return new Set(entry.partnerSegmentIds);
+  }, [hoveredSegmentId, partyIndex]);
+
+  const isMatches = props.viewMode === "matches";
 
   return (
     <table className="w-full min-w-[760px] text-left text-sm">
         <thead>
           <tr className="text-muted-foreground border-b text-xs">
-            <th className="whitespace-nowrap px-2 py-2 font-medium" title="Leaderboard position by current sort order">
-              #
-            </th>
-            <th className="whitespace-nowrap px-2 py-2 font-medium" title="Tracked player IGN and platform">
-              <button className="hover:text-foreground text-left" onClick={() => onSort("ign")} type="button">
-                Player{sortIndicator(sortKey === "ign", sortDir)}
-              </button>
+            <th className="whitespace-nowrap px-2 py-2 font-medium" title="Tracked player IGN">
+              Player
             </th>
             <th className="whitespace-nowrap px-2 py-2 font-medium" title="Latest rank tier and current RP">
-              <button className="hover:text-foreground text-left" onClick={() => onSort("rankScore")} type="button">
-                Rank{sortIndicator(sortKey === "rankScore", sortDir)}
-              </button>
+              Rank
             </th>
-            <th className="whitespace-nowrap px-2 py-2 text-right font-medium" title="Rolling 24-hour RP change">
-              <button className="hover:text-foreground inline-block w-full text-right" onClick={() => onSort("deltaRp24h")} type="button">
-                24h Delta{sortIndicator(sortKey === "deltaRp24h", sortDir)}
-              </button>
+            <th
+              className="w-[110px] min-w-[110px] whitespace-nowrap px-2 py-2 text-right font-medium"
+              title={`Rolling RP change over the last ${RP_DELTA_WINDOW_LABEL[props.rpDeltaWindow]}`}
+            >
+              {RP_DELTA_WINDOW_LABEL[props.rpDeltaWindow]} Delta
             </th>
-            <th className="w-full px-2 py-2 font-medium" title="7-day RP sparkline. Hover to scrub point values.">
-              7d Trend
+            <th
+              className="w-full px-2 py-2 text-center font-medium"
+              colSpan={isMatches ? 4 : 1}
+              title={
+                isMatches
+                  ? "Last 60 ranked games, newest top-left. Hover to see legend, RP, and map."
+                  : "7-day RP sparkline. Hover to scrub point values."
+              }
+            >
+              {isMatches ? "Last 60 games" : "7d Trend"}
             </th>
           </tr>
         </thead>
         <tbody>
-          {sortedRows.map((row, index) => (
-            <tr key={row.trackedAccountId} className="border-border/60 border-b last:border-0">
-              <td className="px-2 py-2 align-middle">{index + 1}</td>
-              <td className="px-2 py-2 align-middle">
-                <div className="flex min-w-0 flex-col gap-1 leading-tight">
-                  <PendingLink
-                    href={`/player/${row.trackedAccountId}`}
-                    className="truncate font-medium hover:underline"
-                    title={row.ign}
-                  >
-                    {row.ign}
-                  </PendingLink>
-                  <span
-                    className="inline-flex w-fit items-center rounded border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] uppercase text-cyan-300"
-                    title={row.platform}
-                  >
-                    {platformLabel(row.platform)}
-                  </span>
-                </div>
-              </td>
-              <td className="px-2 py-2 align-middle">
-                <div className="flex min-w-0 items-start gap-2 leading-tight">
-                  {getRankIconUrl(row.rankName, row.rankDivision) ? (
-                    <img
-                      src={getRankIconUrl(row.rankName, row.rankDivision)!}
-                      alt=""
-                      className="mt-0.5 h-8 w-8 shrink-0 object-contain"
-                    />
-                  ) : null}
-                  <div className="min-w-0 flex-1">
-                    <span className="truncate" title={row.rankName}>
-                      {row.rankName}
-                      {row.rankDivision ? ` ${row.rankDivision}` : ""}
-                    </span>
-                    <span className="text-muted-foreground block whitespace-nowrap text-xs">
-                      {row.rankScore.toLocaleString()} RP
-                    </span>
+          {sortedRows.map((row) => {
+            const cells =
+              props.recentGamesByTrackedAccountId[row.trackedAccountId] ?? [];
+            return (
+              <tr key={row.trackedAccountId} className="border-border/60 border-b last:border-0">
+                <td className="px-2 py-2 align-middle">
+                  <div className="flex min-w-0 flex-col leading-tight">
+                    <PendingLink
+                      href={`/player/${row.trackedAccountId}`}
+                      className="truncate text-sm font-medium hover:underline"
+                      title={row.ign}
+                    >
+                      {row.ign}
+                    </PendingLink>
+                    {row.ownerDisplayName ? (
+                      <span
+                        className="text-muted-foreground truncate text-[11px]"
+                        title={row.ownerDisplayName}
+                      >
+                        {row.ownerDisplayName}
+                      </span>
+                    ) : null}
                   </div>
-                </div>
-              </td>
-              <td className="px-2 py-2 text-right align-middle">
-                {typeof row.deltaRp24h === "number" ? (
-                  <RpDeltaBadge delta={row.deltaRp24h} />
-                ) : (
-                  ""
-                )}
-              </td>
-              <td
-                className="w-full overflow-visible px-2 py-2 align-middle"
-                title="7-day RP trend. Tooltip shows hourly timestamp."
-              >
-                <div className="flex justify-start overflow-visible">
-                  <PlayerTimelineSparkline
-                    trackedAccountId={row.trackedAccountId}
-                    hours={168}
-                    points={props.timelines[row.trackedAccountId] ?? []}
-                    xDomain={timelineXDomain}
+                </td>
+                <td className="px-2 py-2 align-middle">
+                  <div className="flex min-w-0 items-start gap-2 leading-tight">
+                    {getRankIconUrl(row.rankName, row.rankDivision) ? (
+                      <img
+                        src={getRankIconUrl(row.rankName, row.rankDivision)!}
+                        alt=""
+                        className="mt-0.5 h-8 w-8 shrink-0 object-contain"
+                      />
+                    ) : null}
+                    <div className="min-w-0 flex-1">
+                      <span className="truncate" title={row.rankName}>
+                        {row.rankName}
+                        {row.rankDivision ? ` ${row.rankDivision}` : ""}
+                      </span>
+                      <span className="text-muted-foreground block whitespace-nowrap text-xs">
+                        {row.rankScore.toLocaleString()} RP
+                      </span>
+                    </div>
+                  </div>
+                </td>
+                {/* Width is reserved for the widest badge ("+99,999" ≈ 86px incl. icon + padding)
+                    so switching between 24h / 7d / 30d never shifts adjacent columns. */}
+                <td className="w-[110px] min-w-[110px] whitespace-nowrap px-2 py-2 text-right align-middle">
+                  <RpDeltaBadge delta={pickRpDelta(row, props.rpDeltaWindow)} />
+                </td>
+                {isMatches ? (
+                  <LeaderboardMatchesCells
+                    cells={cells}
+                    hoveredSegmentId={hoveredSegmentId}
+                    highlightedSegmentIds={highlightedSegmentIds}
+                    onHoverSegment={setHoveredSegmentId}
                   />
-                </div>
-              </td>
-            </tr>
-          ))}
+                ) : (
+                  <td className="w-full overflow-visible px-2 py-2 align-middle">
+                    {/* Fixed min-height so toggling between sparkline and grid does not
+                        resize the row. 74px matches the sparkline's chart + day-tick strip. */}
+                    <div className="flex min-h-[74px] items-center justify-start overflow-visible">
+                      <PlayerTimelineSparkline
+                        trackedAccountId={row.trackedAccountId}
+                        hours={168}
+                        points={props.timelines[row.trackedAccountId] ?? []}
+                        xDomain={timelineXDomain}
+                      />
+                    </div>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
         </tbody>
     </table>
+  );
+}
+
+/**
+ * Renders the 4 matches-mode cells (grid, top legend, record, avg). Each row
+ * owns its own `hoveredLegend` state so the legend highlight only affects its
+ * own grid. Using real `<td>` elements means the browser auto-aligns column
+ * widths across every player row.
+ */
+function LeaderboardMatchesCells(props: {
+  cells: TDashboardLiveRecentGameCell[];
+  hoveredSegmentId: string | null;
+  highlightedSegmentIds: ReadonlySet<string>;
+  onHoverSegment: (segmentId: string | null) => void;
+}) {
+  const [hoveredLegend, setHoveredLegend] = useState<string | null>(null);
+  const summary: TMatchSummary = useMemo(
+    () => computeMatchSummary(props.cells),
+    [props.cells],
+  );
+  const hasCells = props.cells.length > 0;
+
+  return (
+    <>
+      {/* The grid is w-fit; whitespace-nowrap + explicit min-w keep the table auto-layout
+          algorithm from compressing the 60-cell grid into a smaller column. */}
+      <td className="w-[380px] min-w-[380px] whitespace-nowrap overflow-visible px-2 py-2 align-middle">
+        {/* 74px matches the sparkline's chart + day-tick strip height so the
+            row height is identical between matches and sparkline modes. */}
+        <div className="flex min-h-[74px] items-center">
+          <LeaderboardMatchGrid
+            cells={props.cells}
+            hoveredSegmentId={props.hoveredSegmentId}
+            highlightedSegmentIds={props.highlightedSegmentIds}
+            onHoverSegment={props.onHoverSegment}
+            highlightedLegend={hoveredLegend}
+          />
+        </div>
+      </td>
+      <td className="whitespace-nowrap px-2 py-2 align-middle">
+        {hasCells ? (
+          <TopLegendCellContent
+            summary={summary}
+            onLegendHover={setHoveredLegend}
+          />
+        ) : null}
+      </td>
+      <td className="whitespace-nowrap px-2 py-2 align-middle">
+        {hasCells ? <RecordCellContent summary={summary} /> : null}
+      </td>
+      <td className="w-full whitespace-nowrap px-2 py-2 align-middle">
+        {hasCells ? <AvgCellContent summary={summary} /> : null}
+      </td>
+    </>
   );
 }

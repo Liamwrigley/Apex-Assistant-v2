@@ -151,6 +151,8 @@ export async function getLeaderboardWithDelta24h(guildId?: string): Promise<
     iconUrl: string | null;
     capturedAt: Date;
     deltaRp24h: number | null;
+    deltaRp7d: number | null;
+    deltaRp30d: number | null;
   }>
 > {
   const withGuildFilter = typeof guildId === "string" && guildId.length > 0;
@@ -166,6 +168,8 @@ export async function getLeaderboardWithDelta24h(guildId?: string): Promise<
     iconUrl: string | null;
     capturedAt: Date;
     deltaRp24h: number | null;
+    deltaRp7d: number | null;
+    deltaRp30d: number | null;
   }>(
     `
     with latest as (
@@ -186,20 +190,36 @@ export async function getLeaderboardWithDelta24h(guildId?: string): Promise<
         and ($1::text is null or ta.guild_id = $1)
       order by ta.id, rs.captured_at desc
     ),
+    -- Compute deltas across three windows in a single pass. For each window we
+    -- subtract the earliest in-window snapshot from the latest (both ordered by
+    -- captured_at). filter() is used so we can produce 24h/7d/30d from one scan.
     deltas as (
       select
         ta.id as "trackedAccountId",
         (
-          (array_agg(rs.rank_score order by rs.captured_at desc))[1] -
-          (array_agg(rs.rank_score order by rs.captured_at asc))[1]
-        )::int as "deltaRp24h"
+          (array_agg(rs.rank_score order by rs.captured_at desc)
+            filter (where rs.captured_at >= now() - interval '24 hours'))[1] -
+          (array_agg(rs.rank_score order by rs.captured_at asc)
+            filter (where rs.captured_at >= now() - interval '24 hours'))[1]
+        )::int as "deltaRp24h",
+        (
+          (array_agg(rs.rank_score order by rs.captured_at desc)
+            filter (where rs.captured_at >= now() - interval '7 days'))[1] -
+          (array_agg(rs.rank_score order by rs.captured_at asc)
+            filter (where rs.captured_at >= now() - interval '7 days'))[1]
+        )::int as "deltaRp7d",
+        (
+          (array_agg(rs.rank_score order by rs.captured_at desc)
+            filter (where rs.captured_at >= now() - interval '30 days'))[1] -
+          (array_agg(rs.rank_score order by rs.captured_at asc)
+            filter (where rs.captured_at >= now() - interval '30 days'))[1]
+        )::int as "deltaRp30d"
       from tracked_accounts ta
       join rank_snapshots rs on rs.tracked_account_id = ta.id
       where ta.is_active = true
-        and rs.captured_at >= now() - interval '24 hours'
+        and rs.captured_at >= now() - interval '30 days'
         and ($1::text is null or ta.guild_id = $1)
       group by ta.id
-      having count(*) >= 2
     )
     select
       l."trackedAccountId",
@@ -212,7 +232,9 @@ export async function getLeaderboardWithDelta24h(guildId?: string): Promise<
       l."rankDivision",
       l."iconUrl",
       l."capturedAt",
-      d."deltaRp24h"
+      d."deltaRp24h",
+      d."deltaRp7d",
+      d."deltaRp30d"
     from latest l
     left join deltas d on d."trackedAccountId" = l."trackedAccountId"
     `,

@@ -267,6 +267,70 @@ export async function getRecentSegmentsByAccount(
   return result.rows;
 }
 
+export type TRecentGameCell = {
+  segmentId: string;
+  trackedAccountId: string;
+  startedAt: Date;
+  endedAt: Date;
+  legendAssumed: string | null;
+  rpDelta: number;
+  mapName: string | null;
+};
+
+/**
+ * For each tracked account in `trackedAccountIds`, returns up to
+ * `perAccountLimit` most-recent *closed* ranked games, newest first. Filters
+ * match `segmentCountsAsInferredRankedGame` semantics so the result mirrors
+ * what appears in "Est. games" elsewhere in the app.
+ *
+ * Powered by a single query using `row_number()` partitioned by account so we
+ * avoid N round-trips on the dashboard leaderboard.
+ */
+export async function getRecentGamesByTrackedAccountIds(
+  trackedAccountIds: string[],
+  perAccountLimit = 30
+): Promise<Record<string, TRecentGameCell[]>> {
+  if (trackedAccountIds.length === 0) return {};
+  const result = await pool.query<TRecentGameCell>(
+    `select
+       segment_id as "segmentId",
+       tracked_account_id as "trackedAccountId",
+       started_at as "startedAt",
+       ended_at as "endedAt",
+       legend_assumed as "legendAssumed",
+       rp_delta as "rpDelta",
+       map_name as "mapName"
+     from (
+       select
+         s.id as segment_id,
+         s.tracked_account_id,
+         s.started_at,
+         s.ended_at,
+         s.legend_assumed,
+         s.rp_delta,
+         coalesce(s.ranked_map_name_close, s.ranked_map_name_open) as map_name,
+         row_number() over (
+           partition by s.tracked_account_id
+           order by s.started_at desc
+         ) as rn
+       from inferred_game_segments s
+       where s.tracked_account_id = any($1::uuid[])
+         and s.ended_at is not null
+         and s.rp_delta is not null
+         and s.rp_delta <> 0
+         and extract(epoch from (s.ended_at - s.started_at)) >= $2
+         and (s.trigger_signals->>'reason') is distinct from 'legend_change'
+     ) ranked
+     where rn <= $3`,
+    [trackedAccountIds, SEGMENT_STATS_MIN_DURATION_SEC, perAccountLimit]
+  );
+  const grouped: Record<string, TRecentGameCell[]> = {};
+  for (const row of result.rows) {
+    (grouped[row.trackedAccountId] ??= []).push(row);
+  }
+  return grouped;
+}
+
 export type TLegendAggregate = {
   legend: string;
   games: number;

@@ -1,4 +1,10 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 function SkeletonBar(props: { className?: string }) {
@@ -60,49 +66,72 @@ export default function HomeLoading() {
         />
       </section>
 
-      {/* LeaderboardCard — title row + platform select + wide table */}
+      {/* LeaderboardCard — title row + view toggle + wide table. Matches the
+          real leaderboard-table structure (default sparkline view) so col widths
+          don't jump when the data loads. */}
       <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-4">
-          <div className="space-y-1.5">
-            <CardTitle className="text-base">Leaderboard</CardTitle>
-            <CardDescription>Latest rank snapshot by tracked account.</CardDescription>
+          <div>
+            <CardTitle>Leaderboard</CardTitle>
+            <CardDescription>
+              Latest rank snapshot by tracked account.
+            </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">Platform</span>
-            <SkeletonBar className="h-9 w-[120px] rounded-md" />
+          {/* Two toggles: RP delta window (24h/7d/30d) + view mode (Sparkline/Matches).
+              Sizes are tuned so the skeleton visually lines up with the real toggles
+              and the header doesn't shift width on hydration. */}
+          <div className="flex shrink-0 items-center gap-2">
+            <SkeletonBar className="h-7 w-[130px] rounded-md" />
+            <SkeletonBar className="h-7 w-[152px] rounded-md" />
           </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <div className="min-w-[760px]">
-            <div className="text-muted-foreground flex flex-wrap items-center gap-x-6 gap-y-1 border-b pb-2 text-xs">
-              <span className="w-6 shrink-0">#</span>
-              <span className="min-w-[100px] shrink-0">Player</span>
-              <span className="min-w-[120px] shrink-0">Rank</span>
-              <span className="ml-auto shrink-0 text-right">24h Delta</span>
-              <span className="w-[min(200px,28vw)] shrink-0">7d Trend</span>
-            </div>
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="border-border/60 flex items-center gap-3 border-b py-2.5 last:border-0"
-              >
-                <SkeletonBar className="h-4 w-5 shrink-0" />
-                <div className="min-w-0 flex-1 space-y-1.5">
-                  <SkeletonBar className="h-4 w-32 max-w-full" />
-                  <SkeletonBar className="h-3 w-10" />
-                </div>
-                <div className="hidden min-w-[140px] items-start gap-2 sm:flex">
-                  <SkeletonBar className="mt-0.5 h-8 w-8 shrink-0 rounded-sm" />
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <SkeletonBar className="h-3.5 w-24" />
-                    <SkeletonBar className="h-3 w-16" />
-                  </div>
-                </div>
-                <SkeletonBar className="hidden h-6 w-14 shrink-0 sm:block" />
-                <SkeletonBar className="h-12 w-[min(200px,28vw)] shrink-0 rounded-md" />
-              </div>
-            ))}
-          </div>
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead>
+              <tr className="text-muted-foreground border-b text-xs">
+                <th className="whitespace-nowrap px-2 py-2 font-medium">Player</th>
+                <th className="whitespace-nowrap px-2 py-2 font-medium">Rank</th>
+                <th className="w-[110px] min-w-[110px] whitespace-nowrap px-2 py-2 text-right font-medium">
+                  24h Delta
+                </th>
+                <th className="w-full px-2 py-2 text-center font-medium">7d Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <tr
+                  key={i}
+                  className="border-border/60 border-b last:border-0"
+                >
+                  <td className="px-2 py-2 align-middle">
+                    {/* Matches the real Player cell: IGN (text-sm) + muted Discord name (text-[11px])
+                        stacked with leading-tight and a subtle gap so the two rows don't touch. */}
+                    <div className="flex min-w-0 flex-col gap-0.5 leading-tight">
+                      <SkeletonBar className="h-4 w-28" />
+                      <SkeletonBar className="h-3 w-20" />
+                    </div>
+                  </td>
+                  <td className="px-2 py-2 align-middle">
+                    <div className="flex items-start gap-2">
+                      <SkeletonBar className="mt-0.5 h-8 w-8 shrink-0 rounded-sm" />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <SkeletonBar className="h-4 w-20" />
+                        <SkeletonBar className="h-3 w-14" />
+                      </div>
+                    </div>
+                  </td>
+                  <td className="w-[110px] min-w-[110px] whitespace-nowrap px-2 py-2 text-right align-middle">
+                    <SkeletonBar className="ml-auto h-5 w-20" />
+                  </td>
+                  <td className="w-full overflow-visible px-2 py-2 align-middle">
+                    <div className="flex min-h-[74px] items-center justify-start overflow-visible">
+                      <SkeletonBar className="h-[58px] w-full max-w-[640px] rounded-md" />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </CardContent>
       </Card>
 
@@ -111,8 +140,9 @@ export default function HomeLoading() {
         <CardHeader>
           <CardTitle>Recent sessions</CardTitle>
           <CardDescription>
-            In-progress sessions appear at the top with a live indicator. Completed sessions show rank at
-            start vs end, RP change, and legends while active. Click a row for details.
+            In-progress sessions appear at the top with a live indicator.
+            Completed sessions show rank at start vs end, RP change, and legends
+            while active. Click a row for details.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -120,18 +150,28 @@ export default function HomeLoading() {
             <table className="min-w-[900px] w-full text-left text-sm">
               <thead>
                 <tr className="text-muted-foreground border-b text-xs">
-                  {["Player", "Start", "End", "RP Δ", "Legends", "Est. games", "Duration", "Finished"].map(
-                    (label) => (
-                      <th key={label} className="px-2 py-2 font-medium">
-                        {label}
-                      </th>
-                    ),
-                  )}
+                  {[
+                    "Player",
+                    "Start",
+                    "End",
+                    "RP Δ",
+                    "Legends",
+                    "Est. games",
+                    "Duration",
+                    "Finished",
+                  ].map((label) => (
+                    <th key={label} className="px-2 py-2 font-medium">
+                      {label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-border/60 border-b last:border-0">
+                  <tr
+                    key={i}
+                    className="border-border/60 border-b last:border-0"
+                  >
                     <td className="px-2 py-2 align-top">
                       <div className="flex items-start gap-2">
                         <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-muted/60" />
@@ -200,7 +240,10 @@ export default function HomeLoading() {
                   </thead>
                   <tbody>
                     {Array.from({ length: 3 }).map((_, i) => (
-                      <tr key={i} className="border-border/60 border-b last:border-0">
+                      <tr
+                        key={i}
+                        className="border-border/60 border-b last:border-0"
+                      >
                         <td className="px-2 py-2">
                           <SkeletonBar className="h-4 w-40" />
                         </td>

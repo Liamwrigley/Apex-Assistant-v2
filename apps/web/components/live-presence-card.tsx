@@ -247,7 +247,7 @@ export function LivePresenceCard(props: {
                           <img
                             src={iconUrl}
                             alt=""
-                            className="h-3.5 w-3.5 shrink-0 rounded-sm object-cover"
+                            className="h-3.5 w-3.5 shrink-0 rounded-sm object-cover object-top"
                           />
                         ) : null}
                         <span className="max-w-[7rem] truncate text-[10px]">

@@ -17,7 +17,12 @@ import {
   getBaselineAvgRp,
   getBestStackByMap,
   getPartyMatchEdgesByAccount,
+  getRecentGamesByTrackedAccountIds,
 } from "@apex-assistant/db";
+
+/** Ceiling for the SSR-fetched match grid cells. Matches the API limit so
+ *  initial paint and post-toggle payloads share the same max window. */
+const RECENT_MATCH_GAMES_LIMIT = 240;
 import { buildTrackerRowsForProfile } from "@/lib/tracker-profile-rows";
 import {
   PlayerProfileRangeProvider,
@@ -180,6 +185,7 @@ export default async function PlayerProfilePage(props: {
     stackCompositions,
     baselineAvgRp,
     bestStackByMap,
+    recentGamesByAccount,
   ] = await Promise.all([
     getRankTimelineByTrackedAccountId(trackedAccountId, hours),
     getRecentCompletedSessionsByAccount(trackedAccountId, 30),
@@ -193,7 +199,19 @@ export default async function PlayerProfilePage(props: {
     getStackCompositions(trackedAccountId, hours),
     getBaselineAvgRp(trackedAccountId, hours),
     getBestStackByMap(trackedAccountId, hours),
+    getRecentGamesByTrackedAccountIds(
+      [trackedAccountId],
+      RECENT_MATCH_GAMES_LIMIT,
+    ),
   ]);
+
+  const recentMatchGames = (recentGamesByAccount[trackedAccountId] ?? []).map(
+    (cell) => ({
+      ...cell,
+      startedAt: toIso(cell.startedAt),
+      endedAt: toIso(cell.endedAt),
+    }),
+  );
 
   const displayLegend = resolveProfileDisplayLegendName({
     isOnline: isOnlineForLegend,
@@ -232,6 +250,7 @@ export default async function PlayerProfilePage(props: {
     stackCompositions,
     baselineAvgRp,
     bestStackByMap,
+    recentMatchGames,
   };
 
   const openSession = openSessionSummaries[0] ?? null;
@@ -475,7 +494,7 @@ export default async function PlayerProfilePage(props: {
                               title={name}
                             >
                               {iconUrl ? (
-                                <img src={iconUrl} alt="" className="h-3.5 w-3.5 rounded-sm object-cover" />
+                                <img src={iconUrl} alt="" className="h-3.5 w-3.5 rounded-sm object-cover object-top" />
                               ) : null}
                               <span className="max-w-[7rem] truncate text-[10px]">{name}</span>
                             </span>
@@ -521,6 +540,11 @@ export default async function PlayerProfilePage(props: {
         rows={recentSessionRows}
         partyMatches={partyMatches}
         hidePlayerColumn
+        titleSuffix={
+          <span className="text-muted-foreground text-xs font-normal">
+            last 30 sessions
+          </span>
+        }
         emptyCardContent={
           <p className="text-muted-foreground text-sm">No completed sessions yet.</p>
         }

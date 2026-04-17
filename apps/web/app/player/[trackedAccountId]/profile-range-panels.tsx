@@ -7,12 +7,30 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  LeaderboardMatchGrid,
+  MATCH_GRID_COLS,
+  MATCH_GRID_ROWS,
+} from "@/components/leaderboard-match-grid";
 import { PlayerTimelineSparkline } from "@/components/player-timeline-sparkline";
 import { RpDeltaBadge } from "@/components/rp-delta-badge";
+import { formatRelativeTime } from "@/lib/format-relative-time";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
+import type { TDashboardLiveRecentGameCell } from "@/lib/dashboard-live";
+import { cn } from "@/lib/utils";
 import { useCallback, useMemo, useState } from "react";
 import type { TMapLegendAggregate } from "@apex-assistant/db";
 import { useProfileRange } from "./profile-range-context";
+
+/** Empty set shared across all rows — avoids allocating a new Set every render
+ *  for a feature the single-player match grid doesn't use (party highlighting). */
+const EMPTY_HIGHLIGHTS: ReadonlySet<string> = new Set();
+
+/** Base match-grid window size (3 × 20). Each "Show more" click adds another 3
+ *  rows, mirroring the same row-aligned 60-cell step used by the leaderboard. */
+const INITIAL_MATCH_GRID_CELLS = MATCH_GRID_ROWS * MATCH_GRID_COLS;
+const SHOW_MORE_STEP = MATCH_GRID_ROWS * MATCH_GRID_COLS;
 
 export function PlayerProfileLatestRpInline() {
   const { timelinePoints } = useProfileRange();
@@ -160,7 +178,7 @@ export function PlayerProfileRangeStatsCareer() {
                       <img
                         src={bestLegendIconUrl}
                         alt=""
-                        className="h-5 w-5 shrink-0 rounded-sm object-cover"
+                        className="h-5 w-5 shrink-0 rounded-sm object-cover object-top"
                       />
                     ) : null}
                     <span className="truncate">{bestLegend.legend}</span>
@@ -187,7 +205,7 @@ export function PlayerProfileRangeStatsCareer() {
                       <img
                         src={mostPlayedLegendIconUrl}
                         alt=""
-                        className="h-5 w-5 shrink-0 rounded-sm object-cover"
+                        className="h-5 w-5 shrink-0 rounded-sm object-cover object-top"
                       />
                     ) : null}
                     <span className="truncate">{mostPlayedLegend.legend}</span>
@@ -214,12 +232,15 @@ export function PlayerProfileRangeStatsCareer() {
           <CardHeader className="space-y-1 pb-2">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <CardTitle className="text-base">
-                  {selectedLegend ? (
-                    <>Equipped trackers · <span className="text-muted-foreground font-normal">{selectedLegend}</span></>
-                  ) : (
-                    "Equipped trackers"
-                  )}
+                <CardTitle className="text-base flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <span>
+                    {selectedLegend ? (
+                      <>Equipped trackers · <span className="text-muted-foreground font-normal">{selectedLegend}</span></>
+                    ) : (
+                      "Equipped trackers"
+                    )}
+                  </span>
+                  <RangeSuffix rangeKey={rangeKey} />
                 </CardTitle>
               </div>
               <div className="group relative shrink-0">
@@ -332,7 +353,10 @@ export function PlayerProfileRangeTimelineTables(props: { trackedAccountId: stri
     <>
       <Card className={rangeLoading ? "opacity-70 transition-opacity" : ""}>
         <CardHeader>
-          <CardTitle>RP Timeline</CardTitle>
+          <CardTitle className="flex items-center justify-between gap-2">
+            <span>RP Timeline</span>
+            <RangeSuffix rangeKey={rangeKey} />
+          </CardTitle>
           <CardDescription>Rank score over the selected time range.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -348,10 +372,15 @@ export function PlayerProfileRangeTimelineTables(props: { trackedAccountId: stri
         </CardContent>
       </Card>
 
+      <PlayerProfileMatchHistory />
+
       <Card className={rangeLoading ? "opacity-70 transition-opacity" : ""}>
         <CardHeader>
-          <CardTitle>Legend Performance</CardTitle>
-          <CardDescription>Aggregated RP per legend ({rangeKey}).</CardDescription>
+          <CardTitle className="flex items-center justify-between gap-2">
+            <span>Legend Performance</span>
+            <RangeSuffix rangeKey={rangeKey} />
+          </CardTitle>
+          <CardDescription>Aggregated RP per legend.</CardDescription>
         </CardHeader>
         <CardContent>
           {legendAggregates.length === 0 ? (
@@ -378,7 +407,7 @@ export function PlayerProfileRangeTimelineTables(props: { trackedAccountId: stri
                         <td className="px-2 py-2">
                           <div className="flex items-center gap-2">
                             {iconUrl ? (
-                              <img src={iconUrl} alt="" className="h-5 w-5 rounded-sm object-cover" />
+                              <img src={iconUrl} alt="" className="h-5 w-5 rounded-sm object-cover object-top" />
                             ) : null}
                             <span className="font-medium">{row.legend}</span>
                           </div>
@@ -411,6 +440,570 @@ export function PlayerProfileRangeTimelineTables(props: { trackedAccountId: stri
 
       <MapPerformanceCard rangeLoading={rangeLoading} />
     </>
+  );
+}
+
+/**
+ * Small muted badge used to brand a card's title with the active range.
+ * Keeps the visual treatment consistent across every card on the profile page
+ * so users can always see which timeframe is driving the data they're reading.
+ */
+function RangeSuffix(props: { rangeKey: string; label?: string }) {
+  return (
+    <span className="text-muted-foreground shrink-0 text-xs font-normal tabular-nums">
+      {props.label ?? `${props.rangeKey} window`}
+    </span>
+  );
+}
+
+/** Minimum games a legend/map needs before it qualifies for best/worst
+ *  callouts — one unlucky -40 shouldn't name a legend "worst". */
+const MIN_STAT_SAMPLES = 3;
+
+type TGroupAgg = {
+  name: string;
+  games: number;
+  totalRp: number;
+  avgRp: number;
+};
+
+function pickBestWorst(groups: TGroupAgg[]): {
+  best: TGroupAgg | null;
+  worst: TGroupAgg | null;
+} {
+  const eligible = groups.filter((g) => g.games >= MIN_STAT_SAMPLES);
+  if (eligible.length === 0) return { best: null, worst: null };
+  const sorted = [...eligible].sort((a, b) => b.avgRp - a.avgRp);
+  const best = sorted[0] ?? null;
+  const worst = sorted[sorted.length - 1] ?? null;
+  /** When only one legend/map qualifies, showing it as both best and worst is
+   *  misleading — prefer a single "best" read and hide the redundant worst. */
+  if (best && worst && best.name === worst.name) return { best, worst: null };
+  return { best, worst };
+}
+
+type TStreak = {
+  count: number;
+  direction: "win" | "loss";
+} | null;
+
+type TPlayerMatchStats = {
+  bestLegend: TGroupAgg | null;
+  worstLegend: TGroupAgg | null;
+  bestMap: TGroupAgg | null;
+  worstMap: TGroupAgg | null;
+  record: { wins: number; losses: number };
+  avgRp: number;
+  gamesCounted: number;
+  bestGame: TDashboardLiveRecentGameCell | null;
+  /** Consecutive wins or losses ending at the most recent game. Ties (rpDelta
+   *  === 0) break the streak since they can't be unambiguously labeled. */
+  currentStreak: TStreak;
+};
+
+/** Aggregates every stat the match-history card renders off the same cell list
+ *  powering the grid, so the numbers always match what's visible. */
+function computePlayerMatchStats(
+  cells: TDashboardLiveRecentGameCell[],
+): TPlayerMatchStats {
+  let wins = 0;
+  let losses = 0;
+  let totalRp = 0;
+  let bestGame: TDashboardLiveRecentGameCell | null = null;
+
+  const legendGroups = new Map<string, { games: number; totalRp: number }>();
+  const mapGroups = new Map<string, { games: number; totalRp: number }>();
+
+  for (const cell of cells) {
+    totalRp += cell.rpDelta;
+    if (cell.rpDelta > 0) wins++;
+    else if (cell.rpDelta < 0) losses++;
+
+    if (!bestGame || cell.rpDelta > bestGame.rpDelta) bestGame = cell;
+
+    if (cell.legendAssumed) {
+      const existing = legendGroups.get(cell.legendAssumed) ?? {
+        games: 0,
+        totalRp: 0,
+      };
+      existing.games += 1;
+      existing.totalRp += cell.rpDelta;
+      legendGroups.set(cell.legendAssumed, existing);
+    }
+    if (cell.mapName) {
+      const existing = mapGroups.get(cell.mapName) ?? { games: 0, totalRp: 0 };
+      existing.games += 1;
+      existing.totalRp += cell.rpDelta;
+      mapGroups.set(cell.mapName, existing);
+    }
+  }
+
+  const toGroup = ([name, v]: [string, { games: number; totalRp: number }]): TGroupAgg => ({
+    name,
+    games: v.games,
+    totalRp: v.totalRp,
+    avgRp: v.totalRp / v.games,
+  });
+  const legendAggs = Array.from(legendGroups.entries()).map(toGroup);
+  const mapAggs = Array.from(mapGroups.entries()).map(toGroup);
+
+  const legendBW = pickBestWorst(legendAggs);
+  const mapBW = pickBestWorst(mapAggs);
+
+  /** Cells are already ordered newest-first (repository guarantees `order by
+   *  started_at desc`), so the streak is the run length starting at index 0. */
+  let currentStreak: TStreak = null;
+  const firstSigned = cells.find((c) => c.rpDelta !== 0);
+  if (firstSigned) {
+    const dir: "win" | "loss" = firstSigned.rpDelta > 0 ? "win" : "loss";
+    let count = 0;
+    for (const cell of cells) {
+      if (cell.rpDelta === 0) continue;
+      const cellDir = cell.rpDelta > 0 ? "win" : "loss";
+      if (cellDir !== dir) break;
+      count++;
+    }
+    if (count > 0) currentStreak = { count, direction: dir };
+  }
+
+  return {
+    bestLegend: legendBW.best,
+    worstLegend: legendBW.worst,
+    bestMap: mapBW.best,
+    worstMap: mapBW.worst,
+    record: { wins, losses },
+    avgRp: cells.length > 0 ? totalRp / cells.length : 0,
+    gamesCounted: cells.length,
+    bestGame,
+    currentStreak,
+  };
+}
+
+function StatLabel(props: { children: React.ReactNode }) {
+  return (
+    <span className="text-muted-foreground block text-[10px] font-medium uppercase tracking-wide leading-tight">
+      {props.children}
+    </span>
+  );
+}
+
+function signedAvg(value: number): string {
+  if (value > 0) return `+${value.toFixed(1)}`;
+  return value.toFixed(1);
+}
+
+function signedInt(value: number): string {
+  if (value > 0) return `+${value}`;
+  return String(value);
+}
+
+function avgClass(value: number): string {
+  if (value > 0) return "text-emerald-300";
+  if (value < 0) return "text-rose-300";
+  return "text-muted-foreground";
+}
+
+/** Shared skin for a single stat cell. Top-aligned content so the row height
+ *  of every stat matches — prevents the "shuffling down" the user saw when the
+ *  grid grew taller than the stats column. */
+function StatCell(props: {
+  label: string;
+  children: React.ReactNode;
+  interactiveProps?: React.ButtonHTMLAttributes<HTMLButtonElement>;
+  title?: string;
+}) {
+  const body = (
+    <div className="flex flex-col gap-0.5 leading-tight">
+      <StatLabel>{props.label}</StatLabel>
+      <div className="text-sm tabular-nums">{props.children}</div>
+    </div>
+  );
+  if (props.interactiveProps) {
+    return (
+      <button
+        type="button"
+        title={props.title}
+        {...props.interactiveProps}
+        className={cn(
+          "-mx-1 rounded-sm px-1 py-0.5 text-left transition-colors",
+          "hover:bg-muted/50 focus-visible:bg-muted/50",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400",
+          props.interactiveProps.className,
+        )}
+      >
+        {body}
+      </button>
+    );
+  }
+  return <div title={props.title}>{body}</div>;
+}
+
+function LegendStatValue(props: {
+  legend: string;
+  subtitle: React.ReactNode;
+}) {
+  const iconUrl = getLegendIconUrl(props.legend);
+  return (
+    <div className="flex items-center gap-1.5">
+      {iconUrl ? (
+        <img
+          src={iconUrl}
+          alt=""
+          className="h-7 w-7 shrink-0 rounded-sm border border-border/50 object-cover object-top"
+        />
+      ) : null}
+      <div className="flex min-w-0 flex-col leading-tight">
+        <span className="truncate font-semibold" title={props.legend}>
+          {props.legend}
+        </span>
+        <span className="text-muted-foreground text-[11px] tabular-nums">
+          {props.subtitle}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export function PlayerProfileMatchHistory() {
+  const { recentMatchGames, rangeLoading } = useProfileRange();
+  const [visibleCount, setVisibleCount] = useState(INITIAL_MATCH_GRID_CELLS);
+  const [hoveredSegmentId, setHoveredSegmentId] = useState<string | null>(null);
+  const [highlightedLegend, setHighlightedLegend] = useState<string | null>(null);
+  const [highlightedMap, setHighlightedMap] = useState<string | null>(null);
+
+  const totalAvailable = recentMatchGames.length;
+  const effectiveVisible = Math.min(visibleCount, totalAvailable);
+  const cellsInView = useMemo(
+    () => recentMatchGames.slice(0, effectiveVisible),
+    [recentMatchGames, effectiveVisible],
+  );
+  /** Summary stats are derived from the cells actually on screen so the numbers
+   *  track what the user is looking at as they expand the grid. */
+  const stats = useMemo(
+    () => computePlayerMatchStats(cellsInView),
+    [cellsInView],
+  );
+  const remaining = Math.max(0, totalAvailable - effectiveVisible);
+  const canLoadMore = remaining > 0;
+
+  const hoverLegend = useCallback(
+    (name: string | null) => setHighlightedLegend(name),
+    [],
+  );
+  const hoverMap = useCallback(
+    (name: string | null) => setHighlightedMap(name),
+    [],
+  );
+  const hoverSegment = useCallback(
+    (id: string | null) => setHoveredSegmentId(id),
+    [],
+  );
+
+  if (totalAvailable === 0) {
+    return (
+      <Card className={rangeLoading ? "opacity-70 transition-opacity" : ""}>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between gap-2">
+            <span>Match History</span>
+            <RangeSuffix rangeKey="" label="Last 60 games" />
+          </CardTitle>
+          <CardDescription>
+            Recent ranked games as a contribution graph — greener wins, redder losses.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-muted-foreground text-sm">No ranked games yet.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className={rangeLoading ? "opacity-70 transition-opacity" : ""}>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span>Match History</span>
+          <RangeSuffix rangeKey="" label={`Last ${effectiveVisible} games`} />
+        </CardTitle>
+        <CardDescription>
+          Recent ranked games, newest top-left — hover a cell for details. Summary stats reflect the games in view.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-5">
+          {/* Stats on the left, match grid on the right. `items-start` pins
+              both columns to the top so the grid expanding/shrinking never
+              shifts the stats column or the grid itself — a stable layout
+              is preferred over cosmetically filling whitespace below a
+              short grid. No overflow wrapper around the grid so cell
+              tooltips (which anchor above) aren't clipped. */}
+          <div className="flex flex-col gap-6 md:flex-row md:items-start md:gap-6">
+            <div
+              className={cn(
+                "grid grid-cols-2 gap-x-4 gap-y-4",
+                "sm:grid-cols-2 md:min-w-[340px] md:max-w-[420px] md:flex-shrink-0",
+              )}
+            >
+              <StatCell
+                label="Best Legend"
+                interactiveProps={
+                  stats.bestLegend
+                    ? {
+                        onMouseEnter: () => hoverLegend(stats.bestLegend!.name),
+                        onMouseLeave: () => hoverLegend(null),
+                        onFocus: () => hoverLegend(stats.bestLegend!.name),
+                        onBlur: () => hoverLegend(null),
+                      }
+                    : undefined
+                }
+                title={
+                  stats.bestLegend
+                    ? `Hover to highlight ${stats.bestLegend.name} games`
+                    : undefined
+                }
+              >
+                {stats.bestLegend ? (
+                  <LegendStatValue
+                    legend={stats.bestLegend.name}
+                    subtitle={
+                      <span className={avgClass(stats.bestLegend.avgRp)}>
+                        {signedAvg(stats.bestLegend.avgRp)} avg · {stats.bestLegend.games} games
+                      </span>
+                    }
+                  />
+                ) : (
+                  <span className="text-muted-foreground">
+                    Not enough games
+                  </span>
+                )}
+              </StatCell>
+
+              <StatCell
+                label="Worst Legend"
+                interactiveProps={
+                  stats.worstLegend
+                    ? {
+                        onMouseEnter: () => hoverLegend(stats.worstLegend!.name),
+                        onMouseLeave: () => hoverLegend(null),
+                        onFocus: () => hoverLegend(stats.worstLegend!.name),
+                        onBlur: () => hoverLegend(null),
+                      }
+                    : undefined
+                }
+                title={
+                  stats.worstLegend
+                    ? `Hover to highlight ${stats.worstLegend.name} games`
+                    : undefined
+                }
+              >
+                {stats.worstLegend ? (
+                  <LegendStatValue
+                    legend={stats.worstLegend.name}
+                    subtitle={
+                      <span className={avgClass(stats.worstLegend.avgRp)}>
+                        {signedAvg(stats.worstLegend.avgRp)} avg · {stats.worstLegend.games} games
+                      </span>
+                    }
+                  />
+                ) : (
+                  <span className="text-muted-foreground">
+                    Not enough games
+                  </span>
+                )}
+              </StatCell>
+
+              <StatCell
+                label="Best Map"
+                interactiveProps={
+                  stats.bestMap
+                    ? {
+                        onMouseEnter: () => hoverMap(stats.bestMap!.name),
+                        onMouseLeave: () => hoverMap(null),
+                        onFocus: () => hoverMap(stats.bestMap!.name),
+                        onBlur: () => hoverMap(null),
+                      }
+                    : undefined
+                }
+                title={
+                  stats.bestMap
+                    ? `Hover to highlight ${stats.bestMap.name} games`
+                    : undefined
+                }
+              >
+                {stats.bestMap ? (
+                  <div className="flex flex-col leading-tight">
+                    <span className="truncate font-semibold" title={stats.bestMap.name}>
+                      {stats.bestMap.name}
+                    </span>
+                    <span className="text-muted-foreground text-[11px] tabular-nums">
+                      <span className={avgClass(stats.bestMap.avgRp)}>
+                        {signedAvg(stats.bestMap.avgRp)} avg
+                      </span>
+                      {" · "}
+                      {stats.bestMap.games} games
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">
+                    Not enough games
+                  </span>
+                )}
+              </StatCell>
+
+              <StatCell
+                label="Worst Map"
+                interactiveProps={
+                  stats.worstMap
+                    ? {
+                        onMouseEnter: () => hoverMap(stats.worstMap!.name),
+                        onMouseLeave: () => hoverMap(null),
+                        onFocus: () => hoverMap(stats.worstMap!.name),
+                        onBlur: () => hoverMap(null),
+                      }
+                    : undefined
+                }
+                title={
+                  stats.worstMap
+                    ? `Hover to highlight ${stats.worstMap.name} games`
+                    : undefined
+                }
+              >
+                {stats.worstMap ? (
+                  <div className="flex flex-col leading-tight">
+                    <span className="truncate font-semibold" title={stats.worstMap.name}>
+                      {stats.worstMap.name}
+                    </span>
+                    <span className="text-muted-foreground text-[11px] tabular-nums">
+                      <span className={avgClass(stats.worstMap.avgRp)}>
+                        {signedAvg(stats.worstMap.avgRp)} avg
+                      </span>
+                      {" · "}
+                      {stats.worstMap.games} games
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">
+                    Not enough games
+                  </span>
+                )}
+              </StatCell>
+
+              <StatCell label="Record">
+                <span className="font-semibold">
+                  <span className="text-emerald-300">{stats.record.wins}W</span>
+                  <span className="text-muted-foreground mx-1 font-normal">·</span>
+                  <span className="text-rose-300">{stats.record.losses}L</span>
+                </span>
+              </StatCell>
+
+              <StatCell label="Avg RP">
+                {stats.gamesCounted > 0 ? (
+                  <span className={cn("font-semibold", avgClass(stats.avgRp))}>
+                    {signedAvg(stats.avgRp)}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </StatCell>
+
+              <StatCell
+                label="Best Game"
+                interactiveProps={
+                  stats.bestGame
+                    ? {
+                        onMouseEnter: () => hoverSegment(stats.bestGame!.segmentId),
+                        onMouseLeave: () => hoverSegment(null),
+                        onFocus: () => hoverSegment(stats.bestGame!.segmentId),
+                        onBlur: () => hoverSegment(null),
+                      }
+                    : undefined
+                }
+                title={
+                  stats.bestGame ? "Hover to highlight this match in the grid" : undefined
+                }
+              >
+                {stats.bestGame ? (
+                  <div className="flex flex-col leading-tight">
+                    <span className={cn("font-semibold", avgClass(stats.bestGame.rpDelta))}>
+                      {signedInt(stats.bestGame.rpDelta)} RP
+                    </span>
+                    <span className="text-muted-foreground truncate text-[11px]">
+                      {stats.bestGame.legendAssumed ?? "Unknown"}
+                      {" · "}
+                      {formatRelativeTime(stats.bestGame.endedAt)}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </StatCell>
+
+              <StatCell label="Current Streak">
+                {stats.currentStreak ? (
+                  <div className="flex flex-col leading-tight">
+                    <span
+                      className={cn(
+                        "font-semibold",
+                        stats.currentStreak.direction === "win"
+                          ? "text-emerald-500"
+                          : "text-rose-500",
+                      )}
+                    >
+                      {stats.currentStreak.count}
+                      {stats.currentStreak.direction === "win" ? "W" : "L"}
+                    </span>
+                    <span className="text-muted-foreground truncate text-[11px]">
+                      {stats.currentStreak.direction === "win"
+                        ? stats.currentStreak.count === 1
+                          ? "on a win"
+                          : "wins in a row"
+                        : stats.currentStreak.count === 1
+                          ? "on a loss"
+                          : "losses in a row"}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </StatCell>
+            </div>
+
+            <div className="flex min-w-0 flex-1 justify-end">
+              <LeaderboardMatchGrid
+                cells={cellsInView}
+                highlightedSegmentIds={EMPTY_HIGHLIGHTS}
+                hoveredSegmentId={hoveredSegmentId}
+                onHoverSegment={setHoveredSegmentId}
+                highlightedLegend={highlightedLegend}
+                highlightedMap={highlightedMap}
+                maxCells={effectiveVisible}
+                cellSize="md"
+              />
+            </div>
+          </div>
+
+          {canLoadMore ? (
+            <div className="flex flex-col items-center gap-2 border-t border-border/60 pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setVisibleCount((c) =>
+                    Math.min(totalAvailable, c + SHOW_MORE_STEP),
+                  )
+                }
+              >
+                Show {Math.min(SHOW_MORE_STEP, remaining)} more
+              </Button>
+              <p className="text-muted-foreground text-center text-xs">
+                {remaining} older game{remaining === 1 ? "" : "s"} not shown yet
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -459,9 +1052,12 @@ function MapPerformanceCard(props: { rangeLoading: boolean }) {
   return (
     <Card className={props.rangeLoading ? "opacity-70 transition-opacity" : ""}>
       <CardHeader>
-        <CardTitle>Map Performance</CardTitle>
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span>Map Performance</span>
+          <RangeSuffix rangeKey={rangeKey} />
+        </CardTitle>
         <CardDescription>
-          RP breakdown by ranked map ({rangeKey}). Click maps to show per-legend stats — multiple maps can be open at once.
+          RP breakdown by ranked map. Click maps to show per-legend stats — multiple maps can be open at once.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -639,7 +1235,7 @@ function MapRow(props: {
                         <td className="pl-8 pr-2 py-1.5">
                           <span className="inline-flex items-center gap-1.5">
                             {iconUrl ? (
-                              <img src={iconUrl} alt="" className="h-4 w-4 rounded-sm object-cover" />
+                              <img src={iconUrl} alt="" className="h-4 w-4 rounded-sm object-cover object-top" />
                             ) : null}
                             <span className="font-medium">{leg.legend}</span>
                           </span>

@@ -4,8 +4,10 @@ import {
   getOpenSegmentStartTimes,
   getOpenSessionSummariesForTrackedAccountIds,
   getRankMovers24h,
+  getRecentGamesByTrackedAccountIds,
   getSegmentsBySessionIds,
   listTrackedAccounts,
+  type TRecentGameCell,
 } from "@apex-assistant/db";
 import type {
   TLivePresenceCardRow,
@@ -25,6 +27,9 @@ export type TDashboardLiveLeaderboardRow = {
   rankName: string;
   rankDivision: string | null;
   deltaRp24h: number | null;
+  deltaRp7d: number | null;
+  deltaRp30d: number | null;
+  ownerDisplayName: string | null;
 };
 
 export type TDashboardLiveStatsMover = {
@@ -43,6 +48,17 @@ export type TDashboardLivePresenceRow = TLivePresenceCardRow & {
 
 export type TDashboardLiveOpenSession = NonNullable<TLivePresenceSessionProps>;
 
+export type TDashboardLiveRecentGameCell = Omit<
+  TRecentGameCell,
+  "startedAt" | "endedAt"
+> & {
+  startedAt: string;
+  endedAt: string;
+};
+
+/** Fixed cap per leaderboard row — matches the 3x20 GitHub-style grid UI. */
+export const DASHBOARD_LIVE_RECENT_GAMES_LIMIT = 60;
+
 export type TDashboardLivePayload = {
   generatedAt: string;
   leaderboard: TDashboardLiveLeaderboardRow[];
@@ -54,6 +70,7 @@ export type TDashboardLivePayload = {
   openSessionByTrackedId: Record<string, TDashboardLiveOpenSession>;
   partyGroups: string[][];
   activeRecentSessions: TRecentSessionRow[];
+  recentGamesByTrackedAccountId: Record<string, TDashboardLiveRecentGameCell[]>;
 };
 
 function toIso(d: Date | string): string {
@@ -79,6 +96,10 @@ export async function computeDashboardLive(
     getRankMovers24h(guildFilter),
   ]);
 
+  const ownerDisplayNameByAccountId = new Map(
+    trackedAccounts.map((a) => [a.id, a.ownerDisplayName ?? null]),
+  );
+
   const leaderboard: TDashboardLiveLeaderboardRow[] = [...leaderboardRows]
     .sort((a, b) => b.rankScore - a.rankScore)
     .map((r) => ({
@@ -89,6 +110,10 @@ export async function computeDashboardLive(
       rankName: r.rankName,
       rankDivision: r.rankDivision ?? null,
       deltaRp24h: r.deltaRp24h,
+      deltaRp7d: r.deltaRp7d,
+      deltaRp30d: r.deltaRp30d,
+      ownerDisplayName:
+        ownerDisplayNameByAccountId.get(r.trackedAccountId) ?? null,
     }));
 
   const tracked: TDashboardLivePresenceRow[] = trackedAccounts.map((row) => ({
@@ -112,12 +137,20 @@ export async function computeDashboardLive(
 
   const allTrackedAccountIds = trackedAccounts.map((r) => r.id);
 
-  const [openSessionSummaries, partyGroups, openSegmentStarts] =
-    await Promise.all([
-      getOpenSessionSummariesForTrackedAccountIds(allTrackedAccountIds),
-      getActivePartyGroups(allTrackedAccountIds),
-      getOpenSegmentStartTimes(allTrackedAccountIds),
-    ]);
+  const [
+    openSessionSummaries,
+    partyGroups,
+    openSegmentStarts,
+    recentGamesByAccountRaw,
+  ] = await Promise.all([
+    getOpenSessionSummariesForTrackedAccountIds(allTrackedAccountIds),
+    getActivePartyGroups(allTrackedAccountIds),
+    getOpenSegmentStartTimes(allTrackedAccountIds),
+    getRecentGamesByTrackedAccountIds(
+      allTrackedAccountIds,
+      DASHBOARD_LIVE_RECENT_GAMES_LIMIT,
+    ),
+  ]);
 
   const selectedLegendByAccountId = new Map(
     trackedAccounts.map((a) => [a.id, a.realtimeSelectedLegend ?? null]),
@@ -195,6 +228,22 @@ export async function computeDashboardLive(
       : null,
   };
 
+  const recentGamesByTrackedAccountId: Record<
+    string,
+    TDashboardLiveRecentGameCell[]
+  > = {};
+  for (const [tid, cells] of Object.entries(recentGamesByAccountRaw)) {
+    recentGamesByTrackedAccountId[tid] = cells.map((c) => ({
+      segmentId: c.segmentId,
+      trackedAccountId: c.trackedAccountId,
+      startedAt: toIso(c.startedAt),
+      endedAt: toIso(c.endedAt),
+      legendAssumed: c.legendAssumed,
+      rpDelta: c.rpDelta,
+      mapName: c.mapName,
+    }));
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     leaderboard,
@@ -203,5 +252,6 @@ export async function computeDashboardLive(
     openSessionByTrackedId,
     partyGroups,
     activeRecentSessions,
+    recentGamesByTrackedAccountId,
   };
 }

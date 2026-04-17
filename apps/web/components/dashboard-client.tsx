@@ -226,6 +226,8 @@ export function DashboardClient(props: TDashboardClientProps) {
         rows={live.leaderboard}
         timelines={props.timelines}
         trackedCount={live.tracked.length}
+        recentGamesByTrackedAccountId={live.recentGamesByTrackedAccountId}
+        partyMatches={props.partyMatches}
       />
 
       <LivePresenceSection data={presenceData} />

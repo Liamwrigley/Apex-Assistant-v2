@@ -150,7 +150,10 @@ export default function PlayerProfileLoading() {
       {/* RP Timeline — chart height matches PlayerTimelineSparkline profile variant */}
       <Card>
         <CardHeader>
-          <CardTitle>RP Timeline</CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>RP Timeline</CardTitle>
+            <SkeletonBar className="h-3 w-20" />
+          </div>
           <CardDescription>Rank score over the selected time range.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -158,11 +161,54 @@ export default function PlayerProfileLoading() {
         </CardContent>
       </Card>
 
+      {/* Match History — mirrors the match grid + summary strip */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>Match History</CardTitle>
+            <SkeletonBar className="h-3 w-28" />
+          </div>
+          <CardDescription>
+            Recent ranked games, newest top-left — hover a cell for details. Summary stats reflect the games in view.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-6 md:flex-row md:items-start md:gap-6">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-4 md:min-w-[340px] md:max-w-[420px] md:flex-shrink-0">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="flex flex-col gap-1 leading-tight">
+                  <SkeletonBar className="h-2.5 w-20" />
+                  <div className="flex items-center gap-1.5">
+                    {i === 0 || i === 1 ? (
+                      <SkeletonBar className="h-7 w-7 rounded-sm" />
+                    ) : null}
+                    <div className="flex flex-col gap-1">
+                      <SkeletonBar className="h-3 w-20" />
+                      <SkeletonBar className="h-2.5 w-16" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex min-w-0 flex-1 justify-end">
+              <div className="grid w-fit grid-cols-[repeat(20,minmax(0,auto))] gap-1.5">
+                {Array.from({ length: 60 }).map((_, i) => (
+                  <SkeletonBar key={i} className="h-6 w-6 rounded-[3px]" />
+                ))}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Legend Performance */}
       <Card>
         <CardHeader>
-          <CardTitle>Legend Performance</CardTitle>
-          <CardDescription>Aggregated RP per legend (selected range).</CardDescription>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>Legend Performance</CardTitle>
+            <SkeletonBar className="h-3 w-20" />
+          </div>
+          <CardDescription>Aggregated RP per legend.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -216,7 +262,10 @@ export default function PlayerProfileLoading() {
       {/* Map Performance */}
       <Card>
         <CardHeader>
-          <CardTitle>Map Performance</CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>Map Performance</CardTitle>
+            <SkeletonBar className="h-3 w-20" />
+          </div>
           <CardDescription>
             RP breakdown by ranked map. Per-legend rows expand under each map.
           </CardDescription>
@@ -259,7 +308,10 @@ export default function PlayerProfileLoading() {
       {/* Recent sessions (profile: hide player column → min-w-[780px]) */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent sessions</CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>Recent sessions</CardTitle>
+            <SkeletonBar className="h-3 w-24" />
+          </div>
           <CardDescription>
             In-progress sessions appear at the top with a live indicator. Completed sessions show rank at
             start vs end, RP change, and legends while active. Click a row for details.

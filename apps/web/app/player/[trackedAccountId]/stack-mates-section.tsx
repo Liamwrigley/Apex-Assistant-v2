@@ -43,7 +43,7 @@ function LegendCell(props: { legend: string | null }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       {iconUrl ? (
-        <img src={iconUrl} alt="" className="h-4 w-4 shrink-0 rounded-sm object-cover" />
+        <img src={iconUrl} alt="" className="h-4 w-4 shrink-0 rounded-sm object-cover object-top" />
       ) : null}
       <span className="truncate">{name}</span>
     </span>
@@ -263,7 +263,7 @@ function BestStackByMapTable(props: { rows: TBestStackByMap[]; playerIgn: string
                       return (
                         <span key={i} className="inline-flex items-center gap-1 whitespace-nowrap">
                           {iconUrl ? (
-                            <img src={iconUrl} alt="" className="h-3.5 w-3.5 shrink-0 rounded-sm object-cover" />
+                            <img src={iconUrl} alt="" className="h-3.5 w-3.5 shrink-0 rounded-sm object-cover object-top" />
                           ) : null}
                           <span className="text-foreground">{entry.ign}</span>
                           <span className="text-muted-foreground">{entry.legend ?? "?"}</span>

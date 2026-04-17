@@ -155,3 +155,32 @@ export function serializePartyMatches(
     })),
   }));
 }
+
+export type TSegmentPartyIndexEntry = {
+  matchIndex: number;
+  partnerSegmentIds: string[];
+};
+
+/**
+ * Given the serialized party matches shipped to the client, builds a
+ * `segmentId -> { matchIndex, partnerSegmentIds }` lookup so any match cell on
+ * the leaderboard can find its teammates' cells in O(1). `partnerSegmentIds`
+ * excludes the key's own segment, so it's directly usable as the highlight set
+ * for sibling cells (the hovered cell itself is handled separately in the UI).
+ */
+export function buildSegmentPartyIndex(
+  matches: TPartyMatchSerialized[],
+): Map<string, TSegmentPartyIndexEntry> {
+  const index = new Map<string, TSegmentPartyIndexEntry>();
+  for (let matchIndex = 0; matchIndex < matches.length; matchIndex++) {
+    const match = matches[matchIndex];
+    const allIds = match.players.map((p) => p.segmentId);
+    for (const player of match.players) {
+      index.set(player.segmentId, {
+        matchIndex,
+        partnerSegmentIds: allIds.filter((id) => id !== player.segmentId),
+      });
+    }
+  }
+  return index;
+}

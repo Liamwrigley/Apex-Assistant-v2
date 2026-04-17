@@ -75,7 +75,7 @@ export function RecentSessionDetailModalBody(props: { row: TRecentSessionRow }) 
                   >
                     <span className="flex min-w-0 items-center gap-2">
                       {iconUrl ? (
-                        <img src={iconUrl} alt="" className="h-6 w-6 shrink-0 rounded-sm object-cover" />
+                        <img src={iconUrl} alt="" className="h-6 w-6 shrink-0 rounded-sm object-cover object-top" />
                       ) : null}
                       <span className="truncate font-medium">{entry.legend}</span>
                     </span>

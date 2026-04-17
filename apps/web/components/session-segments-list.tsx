@@ -62,7 +62,7 @@ export function SessionSegmentsList(props: {
             <div className="flex items-start justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
                 {iconUrl ? (
-                  <img src={iconUrl} alt="" className="h-5 w-5 shrink-0 rounded-sm object-cover" />
+                  <img src={iconUrl} alt="" className="h-5 w-5 shrink-0 rounded-sm object-cover object-top" />
                 ) : null}
                 <span className="truncate font-medium">{seg.legendAssumed ?? "?"}</span>
               </div>

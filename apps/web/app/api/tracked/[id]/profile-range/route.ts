@@ -4,6 +4,7 @@ import {
   getMapAggregatesByAccount,
   getMapLegendAggregatesByAccount,
   getRankTimelineByTrackedAccountId,
+  getRecentGamesByTrackedAccountIds,
   getTrackedAccountById,
   getLatestTrackerSnapshotForLegend,
   getTrackerStatDeltasForTrackedAccount,
@@ -12,6 +13,11 @@ import {
   getBaselineAvgRp,
   getBestStackByMap,
 } from "@apex-assistant/db";
+
+/** Max match-grid cells returned per profile range response. 12 full rows
+ *  (12 × 20 = 240) leaves ample room for the "Show more" UX without any extra
+ *  round-trip to the server. */
+const RECENT_MATCH_GAMES_LIMIT = 240;
 import { buildTrackerRowsForProfile } from "@/lib/tracker-profile-rows";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
 import { resolveProfileDisplayLegendName } from "@/lib/profile-display-legend";
@@ -75,6 +81,7 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
       stackCompositions,
       baselineAvgRp,
       bestStackByMap,
+      recentGamesByAccount,
     ] = await Promise.all([
       getRankTimelineByTrackedAccountId(id, hours),
       getLegendAggregatesByAccount(id, hours),
@@ -86,7 +93,14 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
       getStackCompositions(id, hours),
       getBaselineAvgRp(id, hours),
       getBestStackByMap(id, hours),
+      getRecentGamesByTrackedAccountIds([id], RECENT_MATCH_GAMES_LIMIT),
     ]);
+
+    const recentMatchGames = (recentGamesByAccount[id] ?? []).map((cell) => ({
+      ...cell,
+      startedAt: toIso(cell.startedAt),
+      endedAt: toIso(cell.endedAt),
+    }));
 
     const displayLegend = resolveProfileDisplayLegendName({
       isOnline: presenceEval.shouldShow,
@@ -99,28 +113,42 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
 
     const trackerRows = buildTrackerRowsForProfile(trackerSnapshot, trackerDeltas, displayLegend);
 
-    return NextResponse.json({
-      rangeKey,
-      timelinePoints: timelineRaw.map((p) => ({
-        capturedAt: toIso(p.capturedAt),
-        rankScore: p.rankScore,
-      })),
-      legendAggregates,
-      mapAggregates,
-      mapLegendAggregates,
-      careerDeltas,
-      trackerRows,
-      selectedLegend: displayLegend,
-      hasTrackerObservations,
-      legacyApiSummary: {
-        kills: account.careerKills,
-        damage: account.careerDamage,
-        wins: account.careerWins,
+    return NextResponse.json(
+      {
+        rangeKey,
+        timelinePoints: timelineRaw.map((p) => ({
+          capturedAt: toIso(p.capturedAt),
+          rankScore: p.rankScore,
+        })),
+        legendAggregates,
+        mapAggregates,
+        mapLegendAggregates,
+        careerDeltas,
+        trackerRows,
+        selectedLegend: displayLegend,
+        hasTrackerObservations,
+        legacyApiSummary: {
+          kills: account.careerKills,
+          damage: account.careerDamage,
+          wins: account.careerWins,
+        },
+        stackCompositions,
+        baselineAvgRp,
+        bestStackByMap,
+        recentMatchGames,
       },
-      stackCompositions,
-      baselineAvgRp,
-      bestStackByMap,
-    });
+      {
+        status: 200,
+        headers: {
+          // Private: keyed per-user since the profile page is personal.
+          // max-age=30 lets the browser instantly serve repeat clicks on the
+          // same range. SWR=120 keeps the response usable while a background
+          // refresh runs, so toggles feel instant even after the fresh window.
+          "Cache-Control":
+            "private, max-age=30, stale-while-revalidate=120",
+        },
+      },
+    );
   } catch (error) {
     return toApiError(error);
   }

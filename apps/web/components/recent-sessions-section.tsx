@@ -124,6 +124,13 @@ export type RecentSessionsSectionProps = {
   partyMatches?: TPartyMatchSerialized[];
   title?: string;
   description?: string;
+  /**
+   * Muted suffix rendered alongside the title to disclose the timeframe or
+   * scope of the data in the card (e.g. "· last 30 sessions"). Recent sessions
+   * is not tied to the profile range picker, so this is the primary way users
+   * can tell it isn't reacting to range changes.
+   */
+  titleSuffix?: ReactNode;
   /** Hide the Player column when every row is the same account (e.g. profile). */
   hidePlayerColumn?: boolean;
   /** List all rows; disables the pagination and load-more control. */
@@ -211,6 +218,16 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
   const currentHasMore = view === "sessions" ? hasMore : hasMoreMatches;
   const remaining = totalCount - currentVisibleCount;
 
+  const renderTitle = () =>
+    props.titleSuffix ? (
+      <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span>{title}</span>
+        {props.titleSuffix}
+      </span>
+    ) : (
+      title
+    );
+
   if (props.rows.length === 0 && (props.partyMatches ?? []).length === 0) {
     if (props.emptyCardContent == null) {
       return null;
@@ -218,7 +235,7 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>{title}</CardTitle>
+          <CardTitle>{renderTitle()}</CardTitle>
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent>{props.emptyCardContent}</CardContent>
@@ -231,7 +248,7 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
       <CardHeader>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
-            <CardTitle>{title}</CardTitle>
+            <CardTitle>{renderTitle()}</CardTitle>
             <CardDescription className="mt-1">{description}</CardDescription>
           </div>
           {hasPartyData ? (
@@ -416,7 +433,7 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
                                       <img
                                         src={iconUrl}
                                         alt=""
-                                        className="h-3.5 w-3.5 rounded-sm object-cover"
+                                        className="h-3.5 w-3.5 rounded-sm object-cover object-top"
                                       />
                                     ) : null}
                                     <span className="max-w-[5rem] truncate text-[10px]">
@@ -613,7 +630,7 @@ function PartyMatchesView(props: { matches: TPartyMatchSerialized[] }) {
                               <img
                                 src={legendIcon}
                                 alt=""
-                                className="h-3.5 w-3.5 rounded-sm object-cover"
+                                className="h-3.5 w-3.5 rounded-sm object-cover object-top"
                               />
                             ) : null}
                             {p.legend ?? "—"}

@@ -88,7 +88,7 @@ export function SessionSegmentDetail(props: { segments: TSegmentRow[] }) {
                     <td className="px-2.5 py-1.5">
                       <span className="inline-flex items-center gap-1.5">
                         {iconUrl ? (
-                          <img src={iconUrl} alt="" className="h-4 w-4 rounded-sm object-cover" />
+                          <img src={iconUrl} alt="" className="h-4 w-4 rounded-sm object-cover object-top" />
                         ) : null}
                         <span>{seg.legendAssumed ?? "?"}</span>
                       </span>

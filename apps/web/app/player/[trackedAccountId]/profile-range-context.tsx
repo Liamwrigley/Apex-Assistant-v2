@@ -13,6 +13,7 @@ import {
 import { usePathname } from "next/navigation";
 import type { TLegendAggregate, TMapAggregate, TMapLegendAggregate, TStackComposition, TBestStackByMap } from "@apex-assistant/db";
 import type { TTrackerRowUi } from "@/lib/tracker-profile-rows";
+import type { TDashboardLiveRecentGameCell } from "@/lib/dashboard-live";
 
 export type TProfileRangePayload = {
   rangeKey: string;
@@ -20,6 +21,13 @@ export type TProfileRangePayload = {
   legendAggregates: TLegendAggregate[];
   mapAggregates: TMapAggregate[];
   mapLegendAggregates: TMapLegendAggregate[];
+  /**
+   * Last N ranked games for this account, newest first. Not filtered by range —
+   * mirrors the leaderboard's "Last 60 games" contribution grid semantics so
+   * the match-history card has a stable, count-based window regardless of the
+   * range picker.
+   */
+  recentMatchGames: TDashboardLiveRecentGameCell[];
   /** Legacy: deltas from player_stat_snapshots + tracked_accounts — mixed API totals, not per-legend trackers. */
   careerDeltas: {
     deltaKills: number | null;
@@ -71,35 +79,91 @@ export function PlayerProfileRangeProvider(props: {
   const [rangeError, setRangeError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  /**
+   * In-memory payload cache keyed by rangeKey. Switching to a range we've
+   * already loaded is synchronous and network-free — the toggle feels instant
+   * and we avoid re-running 10+ heavy DB aggregations. Initial SSR data is
+   * seeded eagerly so the default range never re-fetches on mount.
+   */
+  const payloadCacheRef = useRef<Map<string, TProfileRangePayload>>(
+    new Map([[props.initial.rangeKey, props.initial]]),
+  );
+  /** In-flight requests deduped by rangeKey (ignores abort). */
+  const inflightRef = useRef<Map<string, Promise<TProfileRangePayload>>>(
+    new Map(),
+  );
+
+  const updateUrlRange = useCallback(
+    (rangeKey: string) => {
+      const qs = new URLSearchParams();
+      qs.set("range", rangeKey);
+      window.history.replaceState(null, "", `${pathname}?${qs.toString()}`);
+    },
+    [pathname],
+  );
+
+  const fetchRange = useCallback(
+    async (
+      nextRangeKey: string,
+      opts: { signal?: AbortSignal } = {},
+    ): Promise<TProfileRangePayload> => {
+      const existing = inflightRef.current.get(nextRangeKey);
+      if (existing) return existing;
+      const promise = (async () => {
+        const res = await fetch(
+          `/api/tracked/${encodeURIComponent(props.trackedAccountId)}/profile-range?range=${encodeURIComponent(nextRangeKey)}`,
+          { signal: opts.signal },
+        );
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          throw new Error(body?.error ?? `Request failed (${res.status})`);
+        }
+        const data = (await res.json()) as TProfileRangePayload;
+        payloadCacheRef.current.set(data.rangeKey, data);
+        return data;
+      })();
+      inflightRef.current.set(nextRangeKey, promise);
+      try {
+        return await promise;
+      } finally {
+        inflightRef.current.delete(nextRangeKey);
+      }
+    },
+    [props.trackedAccountId],
+  );
+
   const applyUrlRange = useCallback(
     async (nextRangeKey: string) => {
+      const cached = payloadCacheRef.current.get(nextRangeKey);
+      if (cached) {
+        abortRef.current?.abort();
+        abortRef.current = null;
+        setRangeError(null);
+        setRangeLoading(false);
+        setState(cached);
+        updateUrlRange(cached.rangeKey);
+        return;
+      }
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
       setRangeLoading(true);
       setRangeError(null);
       try {
-        const res = await fetch(
-          `/api/tracked/${encodeURIComponent(props.trackedAccountId)}/profile-range?range=${encodeURIComponent(nextRangeKey)}`,
-          { signal: ac.signal }
-        );
-        if (!res.ok) {
-          const body = (await res.json().catch(() => null)) as { error?: string } | null;
-          throw new Error(body?.error ?? `Request failed (${res.status})`);
-        }
-        const data = (await res.json()) as TProfileRangePayload;
+        const data = await fetchRange(nextRangeKey, { signal: ac.signal });
+        if (ac.signal.aborted) return;
         setState(data);
-        const qs = new URLSearchParams();
-        qs.set("range", data.rangeKey);
-        window.history.replaceState(null, "", `${pathname}?${qs.toString()}`);
+        updateUrlRange(data.rangeKey);
       } catch (e) {
         if (e instanceof Error && e.name === "AbortError") return;
         setRangeError(e instanceof Error ? e.message : "Failed to load range");
       } finally {
-        setRangeLoading(false);
+        if (abortRef.current === ac) setRangeLoading(false);
       }
     },
-    [pathname, props.trackedAccountId]
+    [fetchRange, updateUrlRange],
   );
 
   const selectRange = useCallback(
@@ -122,6 +186,52 @@ export function PlayerProfileRangeProvider(props: {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [applyUrlRange, state.rangeKey]);
+
+  /**
+   * Warm the cache for other ranges in the background after the page is
+   * idle. Keeps the initial paint lean while making later toggles instant.
+   * Runs once per mount; subsequent navigations within the same profile
+   * re-use the cache already built up.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const abortController = new AbortController();
+    const prefetch = async () => {
+      const queue = RANGES.filter(
+        (r) => !payloadCacheRef.current.has(r),
+      );
+      for (const r of queue) {
+        if (cancelled) return;
+        try {
+          await fetchRange(r, { signal: abortController.signal });
+        } catch {
+          // Best-effort prefetch; errors are silently ignored.
+        }
+      }
+    };
+
+    type TIdleDeadline = { didTimeout: boolean; timeRemaining(): number };
+    type TRequestIdle = (
+      cb: (deadline: TIdleDeadline) => void,
+      opts?: { timeout?: number },
+    ) => number;
+    const w = window as typeof window & { requestIdleCallback?: TRequestIdle };
+    const schedule = w.requestIdleCallback ?? ((cb) => window.setTimeout(cb, 1200));
+    const handle = schedule(() => void prefetch(), { timeout: 3000 });
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+      type TCancelIdle = (handle: number) => void;
+      const cancelIdle = (window as typeof window & { cancelIdleCallback?: TCancelIdle })
+        .cancelIdleCallback;
+      if (cancelIdle) {
+        cancelIdle(handle);
+      } else {
+        window.clearTimeout(handle);
+      }
+    };
+  }, [fetchRange]);
 
   const value = useMemo<TContextValue>(
     () => ({
