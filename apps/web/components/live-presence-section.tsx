@@ -67,7 +67,29 @@ export function LivePresenceSection(props: TLivePresenceSectionProps) {
       return true;
     });
 
-  if (informativeRealtimeRows.length === 0) return null;
+  /** Render an explicit empty state instead of returning null. Returning
+   *  null causes the card to vanish whenever no one happens to be online,
+   *  which is jarring during transient stale-data windows (e.g. SSR snapshot
+   *  shows nobody online but the live poll is about to surface 3 active
+   *  players). A stable placeholder also avoids the page reflowing as the
+   *  card pops in and out. */
+  if (informativeRealtimeRows.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Live Presence</CardTitle>
+          <CardDescription>
+            Realtime activity and the current online session.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-muted-foreground text-sm">
+            No tracked players are online right now.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const liveIdSet = new Set(informativeRealtimeRows.map((r) => r.id));
   const livePartyGroups = partyGroups

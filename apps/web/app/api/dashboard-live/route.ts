@@ -8,9 +8,14 @@ import { computeDashboardLive } from "@/lib/dashboard-live";
  * (leaderboard, 24h movers, presence, open sessions, party groups, active
  * session rows) in a single DB snapshot.
  *
- * Edge-cached with `s-maxage=30, stale-while-revalidate=60` so that regardless
- * of how many dashboard tabs are open, the underlying DB work runs at most
- * roughly once per 30s per `guildId`.
+ * Caching strategy (two-layer):
+ * - `max-age=0, must-revalidate` — browsers never serve a stale copy. Every
+ *   client poll re-asks the network, so users don't see ghost data until
+ *   they hard-refresh.
+ * - `s-maxage=15, stale-while-revalidate=30` — shared caches (CDN/edge) can
+ *   still coalesce concurrent requests from many browsers into one DB hit
+ *   per ~15s per `guildId`, with up to 30s of background-revalidating stale
+ *   serves. This keeps DB load predictable even with many open tabs.
  */
 export async function GET(request: Request): Promise<NextResponse> {
   try {
@@ -30,7 +35,8 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     return NextResponse.json(payload, {
       headers: {
-        "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+        "Cache-Control":
+          "public, max-age=0, must-revalidate, s-maxage=15, stale-while-revalidate=30",
       },
     });
   } catch (error) {
