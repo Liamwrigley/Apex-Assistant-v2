@@ -323,7 +323,7 @@ export default async function PlayerProfilePage(props: {
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <AutoRefresh intervalMs={0} />
+      <AutoRefresh intervalMs={30_000} />
 
       <PlayerProfileRangeProvider
         trackedAccountId={trackedAccountId}

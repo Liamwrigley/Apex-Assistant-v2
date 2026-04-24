@@ -88,6 +88,31 @@ export function PlayerProfileRangeProvider(props: {
   const payloadCacheRef = useRef<Map<string, TProfileRangePayload>>(
     new Map([[props.initial.rangeKey, props.initial]]),
   );
+
+  /**
+   * When the RSC tree re-renders (e.g. via `router.refresh()` from
+   * AutoRefresh), `props.initial` carries freshly evaluated presence and
+   * tracker data. Propagate it into the client cache + displayed state so
+   * presence-derived fields (selectedLegend, trackerRows, hero) stay current
+   * without a full remount.
+   */
+  const prevInitialRef = useRef(props.initial);
+  useEffect(() => {
+    if (prevInitialRef.current === props.initial) return;
+    prevInitialRef.current = props.initial;
+
+    payloadCacheRef.current.set(props.initial.rangeKey, props.initial);
+
+    for (const key of payloadCacheRef.current.keys()) {
+      if (key !== props.initial.rangeKey) {
+        payloadCacheRef.current.delete(key);
+      }
+    }
+
+    setState((prev) =>
+      prev.rangeKey === props.initial.rangeKey ? props.initial : prev,
+    );
+  }, [props.initial]);
   /** In-flight requests deduped by rangeKey (ignores abort). */
   const inflightRef = useRef<Map<string, Promise<TProfileRangePayload>>>(
     new Map(),
