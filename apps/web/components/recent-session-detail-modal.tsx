@@ -56,7 +56,7 @@ function estimatedToMatchCells(
     endedAt: g.endedAt ?? g.startedAt,
     legendAssumed: g.legend,
     rpDelta: g.rpDelta ?? 0,
-    mapName: g.rankedMapNameOpen ?? g.rankedMapNameClose ?? null,
+    mapName: g.rankedMapNameClose ?? g.rankedMapNameOpen ?? null,
   }));
 }
 

@@ -52,7 +52,7 @@ export function SessionSegmentsList(props: {
           seg.endedAt
             ? new Date(seg.endedAt).getTime() - new Date(seg.startedAt).getTime()
             : null;
-        const mapName = seg.rankedMapNameOpen ?? seg.rankedMapNameClose;
+        const mapName = seg.rankedMapNameClose ?? seg.rankedMapNameOpen;
 
         return (
           <li

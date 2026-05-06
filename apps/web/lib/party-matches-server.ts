@@ -47,7 +47,7 @@ export function buildSoloMatchesFromSegments(
 
     soloMatches.push({
       time: seg.startedAt,
-      map: seg.rankedMapNameOpen ?? seg.rankedMapNameClose,
+      map: seg.rankedMapNameClose ?? seg.rankedMapNameOpen,
       players: [
         {
           ign,

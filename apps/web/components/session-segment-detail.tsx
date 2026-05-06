@@ -76,7 +76,7 @@ export function SessionSegmentDetail(props: { segments: TSegmentRow[] }) {
                   seg.endedAt
                     ? new Date(seg.endedAt).getTime() - new Date(seg.startedAt).getTime()
                     : null;
-                const mapName = seg.rankedMapNameOpen ?? seg.rankedMapNameClose;
+                const mapName = seg.rankedMapNameClose ?? seg.rankedMapNameOpen;
 
                 const deltaMap = new Map<string, TSegmentTrackerDelta>();
                 for (const t of seg.trackerDeltas ?? []) {

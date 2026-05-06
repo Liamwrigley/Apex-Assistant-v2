@@ -57,7 +57,7 @@ export function uniqueMapsFromGames(
   const seen = new Set<string>();
   const out: string[] = [];
   for (const g of games) {
-    const name = g.rankedMapNameOpen ?? g.rankedMapNameClose;
+    const name = g.rankedMapNameClose ?? g.rankedMapNameOpen;
     if (name && !seen.has(name)) {
       seen.add(name);
       out.push(name);

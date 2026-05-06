@@ -199,7 +199,7 @@ export async function getStackBreakdown(
        $2::uuid as "teammateAccountId",
        ta.ign as "teammateIgn",
        seg.legend_assumed as "myLegend",
-       coalesce(seg.ranked_map_name_open, seg.ranked_map_name_close) as "mapName",
+       coalesce(seg.ranked_map_name_close, seg.ranked_map_name_open) as "mapName",
        count(*)::int as games,
        coalesce(round(avg(seg.rp_delta)::numeric, 1), 0)::float as "avgRpDelta",
        coalesce(sum(seg.rp_delta), 0)::int as "totalRpDelta"
@@ -208,7 +208,7 @@ export async function getStackBreakdown(
      join tracked_accounts ta on ta.id = $2::uuid
      where seg.legend_assumed is not null
      group by ta.ign, seg.legend_assumed,
-              coalesce(seg.ranked_map_name_open, seg.ranked_map_name_close)
+              coalesce(seg.ranked_map_name_close, seg.ranked_map_name_open)
      order by count(*) desc`,
     [trackedAccountId, teammateAccountId, hours, minScore],
   );
@@ -345,7 +345,7 @@ export async function getStackCompositionBreakdown(
        select
          ms.my_seg_id,
          seg.legend_assumed as my_legend,
-         coalesce(seg.ranked_map_name_open, seg.ranked_map_name_close) as map_name,
+         coalesce(seg.ranked_map_name_close, seg.ranked_map_name_open) as map_name,
          seg.rp_delta,
          array_agg(mate_seg.legend_assumed order by e.mate_id) as mate_legend_arr
        from matching_segs ms
@@ -355,7 +355,7 @@ export async function getStackCompositionBreakdown(
        join inferred_game_segments mate_seg on mate_seg.id = e.mate_seg_id
        where seg.legend_assumed is not null
        group by ms.my_seg_id, seg.legend_assumed,
-                seg.ranked_map_name_open, seg.ranked_map_name_close,
+                seg.ranked_map_name_close, seg.ranked_map_name_open,
                 seg.rp_delta
      )
      select
@@ -420,7 +420,7 @@ export async function getBestStackByMap(
          ss.my_seg_id,
          ss.stack_key,
          seg.legend_assumed as my_legend,
-         coalesce(seg.ranked_map_name_open, seg.ranked_map_name_close) as map_name,
+         coalesce(seg.ranked_map_name_close, seg.ranked_map_name_open) as map_name,
          seg.rp_delta,
          array_agg(mate_seg.legend_assumed order by e.mate_id) as mate_legend_arr
        from seg_stacks ss
@@ -428,9 +428,9 @@ export async function getBestStackByMap(
        join my_edges e on e.my_seg_id = ss.my_seg_id
        join inferred_game_segments mate_seg on mate_seg.id = e.mate_seg_id
        where seg.legend_assumed is not null
-         and coalesce(seg.ranked_map_name_open, seg.ranked_map_name_close) is not null
+         and coalesce(seg.ranked_map_name_close, seg.ranked_map_name_open) is not null
        group by ss.my_seg_id, ss.stack_key, seg.legend_assumed,
-                seg.ranked_map_name_open, seg.ranked_map_name_close, seg.rp_delta
+                seg.ranked_map_name_close, seg.ranked_map_name_open, seg.rp_delta
      ),
      map_comp_legend_agg as (
        select
@@ -618,8 +618,8 @@ export async function getPartyMatchEdges(
        seg_b.closing_rank_score as "closingRankScoreB",
        ta_a.current_rank_icon_url as "rankIconUrlA",
        ta_b.current_rank_icon_url as "rankIconUrlB",
-       coalesce(seg_a.ranked_map_name_open, seg_a.ranked_map_name_close) as "mapA",
-       coalesce(seg_b.ranked_map_name_open, seg_b.ranked_map_name_close) as "mapB",
+       coalesce(seg_a.ranked_map_name_close, seg_a.ranked_map_name_open) as "mapA",
+       coalesce(seg_b.ranked_map_name_close, seg_b.ranked_map_name_open) as "mapB",
        seg_a.started_at as "segStartA",
        seg_b.started_at as "segStartB",
        seg_a.ended_at as "segEndA",
@@ -672,8 +672,8 @@ export async function getPartyMatchEdgesByAccount(
        seg_b.closing_rank_score as "closingRankScoreB",
        ta_a.current_rank_icon_url as "rankIconUrlA",
        ta_b.current_rank_icon_url as "rankIconUrlB",
-       coalesce(seg_a.ranked_map_name_open, seg_a.ranked_map_name_close) as "mapA",
-       coalesce(seg_b.ranked_map_name_open, seg_b.ranked_map_name_close) as "mapB",
+       coalesce(seg_a.ranked_map_name_close, seg_a.ranked_map_name_open) as "mapA",
+       coalesce(seg_b.ranked_map_name_close, seg_b.ranked_map_name_open) as "mapB",
        seg_a.started_at as "segStartA",
        seg_b.started_at as "segStartB",
        seg_a.ended_at as "segEndA",
