@@ -15,6 +15,7 @@ export function getRankIconUrl(
 ): string | null {
   const name = rankName?.trim().toLowerCase();
   if (!name) return null;
+  if (name === "unranked") return null;
 
   if (name === "apex predator" || name === "apexpredator") {
     return `${RANK_ICON_BASE}/apexpredator1.png`;
