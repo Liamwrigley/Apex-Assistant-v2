@@ -478,3 +478,77 @@ export async function getCareerStatDeltasForTrackedAccount(
     deltaWins: diff(row.endWins, row.startWins),
   };
 }
+
+/**
+ * Backfill 0-RP data created by a season reset. When the API reports 0 RP
+ * because a player hasn't logged in yet, we record snapshots/segments/sessions
+ * with rank_score = 0. Once we discover the real new rank, this function
+ * retroactively patches that poisoned data so the timeline and stats are clean.
+ */
+export async function backfillSeasonResetZeros(input: {
+  trackedAccountId: string;
+  newRankScore: number;
+  lookbackHours?: number;
+}): Promise<{ snapshotsPatched: number; segmentsPatched: number; sessionsPatched: number }> {
+  const { trackedAccountId, newRankScore, lookbackHours = 48 } = input;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const snapRes = await client.query<{ count: string }>(
+      `UPDATE rank_snapshots
+       SET rank_score = $2
+       WHERE tracked_account_id = $1
+         AND rank_score = 0
+         AND captured_at >= now() - ($3::int * interval '1 hour')
+       RETURNING id`,
+      [trackedAccountId, newRankScore, lookbackHours]
+    );
+
+    const segRes = await client.query<{ count: string }>(
+      `UPDATE inferred_game_segments
+       SET
+         opening_rank_score = CASE WHEN opening_rank_score = 0 THEN $2 ELSE opening_rank_score END,
+         closing_rank_score = CASE WHEN closing_rank_score = 0 THEN $2 ELSE closing_rank_score END,
+         rp_delta = NULL
+       WHERE tracked_account_id = $1
+         AND (opening_rank_score = 0 OR closing_rank_score = 0)
+         AND started_at >= now() - ($3::int * interval '1 hour')
+       RETURNING id`,
+      [trackedAccountId, newRankScore, lookbackHours]
+    );
+
+    const sessRes = await client.query<{ count: string }>(
+      `UPDATE play_sessions
+       SET
+         opening_rank_score = CASE WHEN opening_rank_score = 0 THEN $2 ELSE opening_rank_score END,
+         latest_rank_score = CASE WHEN latest_rank_score = 0 THEN $2 ELSE latest_rank_score END
+       WHERE tracked_account_id = $1
+         AND (opening_rank_score = 0 OR latest_rank_score = 0)
+         AND started_at >= now() - ($3::int * interval '1 hour')
+       RETURNING id`,
+      [trackedAccountId, newRankScore, lookbackHours]
+    );
+
+    await client.query("COMMIT");
+
+    const result = {
+      snapshotsPatched: snapRes.rowCount ?? 0,
+      segmentsPatched: segRes.rowCount ?? 0,
+      sessionsPatched: sessRes.rowCount ?? 0,
+    };
+
+    if (result.snapshotsPatched > 0 || result.segmentsPatched > 0 || result.sessionsPatched > 0) {
+      console.log(
+        `[db] season reset backfill account=${trackedAccountId} new_rank=${newRankScore} snapshots=${result.snapshotsPatched} segments=${result.segmentsPatched} sessions=${result.sessionsPatched}`
+      );
+    }
+
+    return result;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}

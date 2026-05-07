@@ -13,7 +13,7 @@ import {
   type TMatchSummary,
 } from "@/components/leaderboard-match-summary";
 import { PlayerTimelineSparkline } from "@/components/player-timeline-sparkline";
-import { getRankIconUrl } from "@/lib/rank-icon-url";
+import { getRankIconUrl, RANK_ICON_FALLBACK } from "@/lib/rank-icon-url";
 import { RpDeltaBadge } from "@/components/rp-delta-badge";
 import type { TDashboardLiveRecentGameCell } from "@/lib/dashboard-live";
 import {
@@ -171,13 +171,11 @@ export function LeaderboardTable(props: {
                 </td>
                 <td className="px-2 py-2 align-middle">
                   <div className="flex min-w-0 items-start gap-2 leading-tight">
-                    {getRankIconUrl(row.rankName, row.rankDivision) ? (
-                      <img
-                        src={getRankIconUrl(row.rankName, row.rankDivision)!}
-                        alt=""
-                        className="mt-0.5 h-8 w-8 shrink-0 object-contain"
-                      />
-                    ) : null}
+                    <img
+                      src={getRankIconUrl(row.rankName, row.rankDivision) ?? RANK_ICON_FALLBACK}
+                      alt=""
+                      className="mt-0.5 h-8 w-8 shrink-0 object-contain rounded-full"
+                    />
                     <div className="min-w-0 flex-1">
                       <span className="truncate" title={row.rankName}>
                         {row.rankName}

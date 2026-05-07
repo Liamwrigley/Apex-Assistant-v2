@@ -14,6 +14,7 @@ import {
 } from "@apex-assistant/cache";
 import {
   autoLinkTrackedAccountByExactFingerprint,
+  backfillSeasonResetZeros,
   claimNextDueTrackedAccount,
   getLatestRankScoreForAccount,
   hasIgnConflictForDifferentExternalId,
@@ -128,6 +129,24 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
     }
     const previousScore = await getLatestRankScoreForAccount(account.id);
     const scoreChanged = previousScore !== null && previousScore !== rank.rankScore;
+
+    if (previousScore === 0 && rank.rankScore > 1000) {
+      const backfillResult = await backfillSeasonResetZeros({
+        trackedAccountId: account.id,
+        newRankScore: rank.rankScore,
+      });
+      if (backfillResult.snapshotsPatched > 0 || backfillResult.segmentsPatched > 0 || backfillResult.sessionsPatched > 0) {
+        await cacheInvalidate(
+          ...guildScopedKeys(CacheKeys.dashboardLive, account.guildId),
+          ...guildScopedKeys(CacheKeys.dashboardStatic, account.guildId),
+          ...guildScopedKeys(CacheKeys.leaderboard, account.guildId),
+          ...guildScopedKeys(CacheKeys.lbTimelines, account.guildId),
+          ...guildScopedKeys(CacheKeys.stats24h, account.guildId),
+          ...guildScopedKeys(CacheKeys.tracked, account.guildId),
+          ...playerInvalidationKeys(account.id),
+        );
+      }
+    }
 
     let mapForSnapshot: { rankedMapCode: string; rankedMapName: string } | undefined;
     if (scoreChanged) {

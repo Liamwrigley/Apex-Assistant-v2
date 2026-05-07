@@ -1,4 +1,4 @@
-import { getRankIconUrl } from "@/lib/rank-icon-url";
+import { getRankIconUrl, RANK_ICON_FALLBACK } from "@/lib/rank-icon-url";
 import { cn } from "@/lib/utils";
 
 export type TSessionRankSnap = {
@@ -42,21 +42,14 @@ export function SessionRankSnap(props: {
         </div>
       ) : null}
       <div className={cn("flex items-start gap-2", compact && "gap-1.5")}>
-        {iconUrl ? (
-          <img
-            src={iconUrl}
-            alt=""
-            className={cn(
-              "mt-0.5 shrink-0 object-contain",
-              compact ? "h-6 w-6" : "h-8 w-8"
-            )}
-          />
-        ) : (
-          <div
-            className={cn("mt-0.5 shrink-0 rounded bg-muted", compact ? "h-6 w-6" : "h-8 w-8")}
-            aria-hidden
-          />
-        )}
+        <img
+          src={iconUrl ?? RANK_ICON_FALLBACK}
+          alt=""
+          className={cn(
+            "mt-0.5 shrink-0 object-contain rounded-full",
+            compact ? "h-6 w-6" : "h-8 w-8"
+          )}
+        />
         <div className="min-w-0 leading-tight">
           {tierLine ? (
             <div className="truncate text-xs font-medium">{tierLine}</div>

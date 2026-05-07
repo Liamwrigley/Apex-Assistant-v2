@@ -1,5 +1,8 @@
 const RANK_ICON_BASE = "https://api.mozambiquehe.re/assets/ranks";
 
+/** Fallback image shown when rank data is unavailable (e.g. season reset, 0 RP). */
+export const RANK_ICON_FALLBACK = "/logo.png";
+
 /**
  * Derive the canonical rank icon URL from a rank name and division.
  *

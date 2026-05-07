@@ -2,7 +2,7 @@
 
 import { PendingLink } from "@/components/pending-link";
 import { formatRelativeTime } from "@/lib/format-relative-time";
-import { getRankIconUrl } from "@/lib/rank-icon-url";
+import { getRankIconUrl, RANK_ICON_FALLBACK } from "@/lib/rank-icon-url";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -185,13 +185,11 @@ export function TrackedAccountsOwnerTable(props: {
                     <td className="px-2 py-2">
                       {row.currentRankName ? (
                         <div className="flex min-w-0 items-center gap-2">
-                          {getRankIconUrl(row.currentRankName, row.currentRankDivision) ? (
-                            <img
-                              src={getRankIconUrl(row.currentRankName, row.currentRankDivision)!}
-                              alt=""
-                              className="h-8 w-8 shrink-0 object-contain"
-                            />
-                          ) : null}
+                          <img
+                            src={getRankIconUrl(row.currentRankName, row.currentRankDivision) ?? RANK_ICON_FALLBACK}
+                            alt=""
+                            className="h-8 w-8 shrink-0 object-contain rounded-full"
+                          />
                           <div className="min-w-0">
                             <div className="truncate font-medium leading-tight">
                               {row.currentRankName}

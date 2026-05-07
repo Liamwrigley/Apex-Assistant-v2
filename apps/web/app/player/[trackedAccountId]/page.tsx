@@ -24,7 +24,7 @@ import { SessionRankSnap, type TSessionRankSnap } from "@/components/session-ran
 import { formatDurationMs } from "@/lib/format-duration";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
-import { getRankIconUrl } from "@/lib/rank-icon-url";
+import { getRankIconUrl, RANK_ICON_FALLBACK } from "@/lib/rank-icon-url";
 import {
   evaluateRealtimePresence,
   REALTIME_PRESENCE_MAX_AGE_MINUTES,
@@ -192,13 +192,11 @@ export default async function PlayerProfilePage(props: {
                 </div>
                 {account.currentRankName ? (
                   <div className="mt-1 flex items-center gap-1.5">
-                    {getRankIconUrl(account.currentRankName, account.currentRankDivision) ? (
-                      <img
-                        src={getRankIconUrl(account.currentRankName, account.currentRankDivision)!}
-                        alt=""
-                        className="h-4 w-4 shrink-0 object-contain"
-                      />
-                    ) : null}
+                    <img
+                      src={getRankIconUrl(account.currentRankName, account.currentRankDivision) ?? RANK_ICON_FALLBACK}
+                      alt=""
+                      className="h-4 w-4 shrink-0 object-contain rounded-full"
+                    />
                     <span className="text-muted-foreground truncate text-[11px]">
                       {account.currentRankName}
                       {account.currentRankDivision ? ` ${account.currentRankDivision}` : ""}

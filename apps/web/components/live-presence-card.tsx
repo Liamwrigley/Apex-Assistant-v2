@@ -8,7 +8,7 @@ import {
 } from "@/components/rp-delta-badge";
 import { formatDurationMs } from "@/lib/format-duration";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
-import { getRankIconUrl } from "@/lib/rank-icon-url";
+import { getRankIconUrl, RANK_ICON_FALLBACK } from "@/lib/rank-icon-url";
 import { evaluateRealtimePresence } from "@/lib/realtime-presence";
 import { cn } from "@/lib/utils";
 
@@ -79,13 +79,11 @@ function InlineRankSnap(props: {
         {label}
       </div>
       <div className="mt-0.5 flex items-center gap-1.5">
-        {iconUrl ? (
-          <img
-            src={iconUrl}
-            alt=""
-            className="h-7 w-7 shrink-0 object-contain"
-          />
-        ) : null}
+        <img
+          src={iconUrl ?? RANK_ICON_FALLBACK}
+          alt=""
+          className="h-7 w-7 shrink-0 object-contain rounded-full"
+        />
         <div className="min-w-0 leading-tight">
           <div className="truncate text-[10px] font-medium text-foreground">
             {tierLine || "—"}
