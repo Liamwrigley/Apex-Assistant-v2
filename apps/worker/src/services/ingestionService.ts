@@ -9,6 +9,7 @@ import {
 import {
   cacheInvalidate,
   CacheKeys,
+  guildScopedKeys,
   playerInvalidationKeys,
 } from "@apex-assistant/cache";
 import {
@@ -226,23 +227,26 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
     const anythingChanged = scoreChanged || presenceChanged || sessionChanged;
 
     if (anythingChanged) {
+      const gid = account.guildId;
       const keysToInvalidate: string[] = [
-        CacheKeys.dashboardLive(account.guildId),
-        CacheKeys.tracked(account.guildId),
+        ...guildScopedKeys(CacheKeys.dashboardLive, gid),
+        ...guildScopedKeys(CacheKeys.tracked, gid),
       ];
 
       if (scoreChanged) {
         keysToInvalidate.push(
-          CacheKeys.leaderboard(account.guildId),
-          CacheKeys.lbTimelines(account.guildId),
-          CacheKeys.stats24h(account.guildId),
-          CacheKeys.dashboardStatic(account.guildId),
+          ...guildScopedKeys(CacheKeys.leaderboard, gid),
+          ...guildScopedKeys(CacheKeys.lbTimelines, gid),
+          ...guildScopedKeys(CacheKeys.stats24h, gid),
+          ...guildScopedKeys(CacheKeys.dashboardStatic, gid),
           ...playerInvalidationKeys(account.id),
         );
       }
 
       if (sessionChanged) {
-        keysToInvalidate.push(CacheKeys.dashboardStatic(account.guildId));
+        keysToInvalidate.push(
+          ...guildScopedKeys(CacheKeys.dashboardStatic, gid),
+        );
       }
 
       await cacheInvalidate(...keysToInvalidate);

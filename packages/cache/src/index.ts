@@ -74,6 +74,30 @@ export const CacheKeys = {
   health: () => "health",
 } as const;
 
+/**
+ * Returns the guild filter string used for cache keys, derived from
+ * `DISCORD_GUILD_ID` env var. Returns `undefined` when unset/empty,
+ * which maps to the `"all"` suffix in `CacheKeys`.
+ */
+export function getGuildFilterForCache(): string | undefined {
+  const guildId = process.env.DISCORD_GUILD_ID?.trim();
+  return guildId && guildId.length > 0 ? guildId : undefined;
+}
+
+/**
+ * Returns all guild-scoped cache keys that should be invalidated for a
+ * given key builder. Includes both the specific guild key and the "all"
+ * key, since web requests can arrive with or without a guildId param.
+ */
+export function guildScopedKeys(
+  keyFn: (guildId?: string) => string,
+  guildId?: string,
+): string[] {
+  const keys = [keyFn(undefined)];
+  if (guildId) keys.push(keyFn(guildId));
+  return keys;
+}
+
 /** All range keys used by the profile-range API. */
 export const ALL_PROFILE_RANGES = ["24h", "3d", "7d", "14d", "30d"] as const;
 
