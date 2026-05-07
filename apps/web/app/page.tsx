@@ -1,3 +1,4 @@
+import { cacheRead, CacheKeys } from "@apex-assistant/cache";
 import { DashboardClient } from "@/components/dashboard-client";
 import type { TRecentSessionRow } from "@/components/recent-sessions-section";
 import { computeDashboardLive } from "@/lib/dashboard-live";
@@ -19,8 +20,6 @@ import {
   getSegmentsBySessionIds,
   listTrackedAccounts,
 } from "@apex-assistant/db";
-
-export const revalidate = 60;
 const debugLogs = (process.env.DEBUG_LOGS ?? "false").toLowerCase() === "true";
 
 function pageLog(message: string, meta?: Record<string, unknown>) {
@@ -191,8 +190,12 @@ export default async function HomePage() {
   });
 
   const [initialLive, staticData] = await Promise.all([
-    computeDashboardLive(guildFilter),
-    loadDashboardStatic(guildFilter),
+    cacheRead(CacheKeys.dashboardLive(guildFilter), () =>
+      computeDashboardLive(guildFilter),
+    ),
+    cacheRead(CacheKeys.dashboardStatic(guildFilter), () =>
+      loadDashboardStatic(guildFilter),
+    ),
   ]);
 
   pageLog("render data summary", {

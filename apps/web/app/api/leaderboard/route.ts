@@ -1,5 +1,6 @@
 import { SlidingWindowLimiter } from "@apex-assistant/core";
 import { getLeaderboardWithDelta24h } from "@apex-assistant/db";
+import { cacheRead, CacheKeys } from "@apex-assistant/cache";
 import { NextResponse } from "next/server";
 import { debugLog } from "@/app/api/_lib/log";
 import { toApiError } from "@/app/api/_lib/responses";
@@ -18,15 +19,17 @@ export async function GET(request: Request): Promise<NextResponse> {
     const limiterKey = `${guildId ?? "all"}:${userId}:leaderboard`;
     debugLog("leaderboard", "request", { guildId: guildId ?? null, userId });
     limiter.assertAllowed(limiterKey);
-    const rows = await getLeaderboardWithDelta24h(guildId ?? undefined);
-    debugLog("leaderboard", "rows loaded", { guildId, count: rows.length });
-    return NextResponse.json(
-      rows.sort((a, b) => b.rankScore - a.rankScore),
-      {
-        status: 200,
-        headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" },
+
+    const rows = await cacheRead(
+      CacheKeys.leaderboard(guildId ?? undefined),
+      async () => {
+        const data = await getLeaderboardWithDelta24h(guildId ?? undefined);
+        return data.sort((a, b) => b.rankScore - a.rankScore);
       },
     );
+
+    debugLog("leaderboard", "rows loaded", { guildId, count: rows.length });
+    return NextResponse.json(rows);
   } catch (error) {
     debugLog("leaderboard", "error", { message: error instanceof Error ? error.message : "Unknown error" });
     return toApiError(error);

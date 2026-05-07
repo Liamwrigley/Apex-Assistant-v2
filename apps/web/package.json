@@ -10,6 +10,7 @@
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@apex-assistant/cache": "0.1.0",
     "@apex-assistant/core": "0.1.0",
     "@apex-assistant/db": "0.1.0",
     "@radix-ui/react-dialog": "^1.1.15",

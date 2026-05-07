@@ -32,7 +32,5 @@ export async function GET(): Promise<NextResponse> {
     check("worker", getWorkerBaseUrl()),
     check("discord", getDiscordBotBaseUrl()),
   ]);
-  return NextResponse.json({ worker, discord }, {
-    headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=30" },
-  });
+  return NextResponse.json({ worker, discord });
 }

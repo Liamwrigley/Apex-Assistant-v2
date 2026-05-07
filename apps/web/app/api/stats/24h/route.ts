@@ -1,4 +1,5 @@
 import { getRankMovers24h } from "@apex-assistant/db";
+import { cacheRead, CacheKeys } from "@apex-assistant/cache";
 import { NextResponse } from "next/server";
 import { debugLog } from "@/app/api/_lib/log";
 import { toApiError } from "@/app/api/_lib/responses";
@@ -8,14 +9,17 @@ export async function GET(request: Request): Promise<NextResponse> {
     const url = new URL(request.url);
     const guildId = url.searchParams.get("guildId");
     debugLog("stats-24h", "request", { guildId: guildId ?? null });
-    const movers = await getRankMovers24h(guildId ?? undefined);
+
+    const movers = await cacheRead(
+      CacheKeys.stats24h(guildId ?? undefined),
+      () => getRankMovers24h(guildId ?? undefined),
+    );
+
     debugLog("stats-24h", "computed", {
       highestGainer: movers.highestGainer?.ign ?? null,
       biggestLoser: movers.biggestLoser?.ign ?? null
     });
-    return NextResponse.json(movers, {
-      headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" },
-    });
+    return NextResponse.json(movers);
   } catch (error) {
     debugLog("stats-24h", "error", { message: error instanceof Error ? error.message : "Unknown error" });
     return toApiError(error);

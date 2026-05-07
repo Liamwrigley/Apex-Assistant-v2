@@ -34,6 +34,10 @@ export type TRecentCompletedSessionRow = {
   legends: string[];
 };
 
+export type TSyncPlaySessionResult = {
+  sessionChanged: boolean;
+};
+
 export async function syncPlaySessionIngest(input: {
   trackedAccountId: string;
   prevActive: boolean;
@@ -44,7 +48,7 @@ export async function syncPlaySessionIngest(input: {
   rankDivision: string | null;
   rankIconUrl: string | null;
   selectedLegend: string | null;
-}): Promise<void> {
+}): Promise<TSyncPlaySessionResult> {
   const rn = input.rankName;
   const rd = input.rankDivision;
   const ri = input.rankIconUrl;
@@ -82,7 +86,7 @@ export async function syncPlaySessionIngest(input: {
         );
       }
       await client.query("COMMIT");
-      return;
+      return { sessionChanged: !!openId };
     }
 
     let sessionId: string;
@@ -175,6 +179,10 @@ export async function syncPlaySessionIngest(input: {
     }
 
     await client.query("COMMIT");
+
+    const sessionOpened = !input.prevActive && input.nextActive;
+    const sessionCreatedFallback = !openId && input.nextActive;
+    return { sessionChanged: sessionOpened || sessionCreatedFallback };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

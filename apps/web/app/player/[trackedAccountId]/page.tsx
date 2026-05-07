@@ -1,33 +1,10 @@
 import { notFound } from "next/navigation";
+import { cacheRead, CacheKeys } from "@apex-assistant/cache";
 import { PendingLink } from "@/components/pending-link";
-import {
-  getTrackedAccountById,
-  getRankTimelineByTrackedAccountId,
-  getRecentCompletedSessionsByAccount,
-  getOpenSessionSummariesForTrackedAccountIds,
-  getSegmentsBySessionIds,
-  getLegendAggregatesByAccount,
-  getMapAggregatesByAccount,
-  getMapLegendAggregatesByAccount,
-  getCareerStatDeltasForTrackedAccount,
-  getLatestTrackerSnapshotForLegend,
-  getTrackerStatDeltasForTrackedAccount,
-  hasAnyTrackerObservations,
-  getStackCompositions,
-  getBaselineAvgRp,
-  getBestStackByMap,
-  getPartyMatchEdgesByAccount,
-  getRecentGamesByTrackedAccountIds,
-} from "@apex-assistant/db";
-
-/** Ceiling for the SSR-fetched match grid cells. Matches the API limit so
- *  initial paint and post-toggle payloads share the same max window. */
-const RECENT_MATCH_GAMES_LIMIT = 240;
-import { buildTrackerRowsForProfile } from "@/lib/tracker-profile-rows";
+import { loadPlayerPage } from "@/lib/player-page-data";
 import {
   PlayerProfileRangeProvider,
   PlayerProfileRangePicker,
-  type TProfileRangePayload,
 } from "./profile-range-context";
 import {
   PlayerProfileHeroImage,
@@ -48,7 +25,6 @@ import { formatDurationMs } from "@/lib/format-duration";
 import { formatRelativeTime } from "@/lib/format-relative-time";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
 import { getRankIconUrl } from "@/lib/rank-icon-url";
-import { resolveProfileDisplayLegendName } from "@/lib/profile-display-legend";
 import {
   evaluateRealtimePresence,
   REALTIME_PRESENCE_MAX_AGE_MINUTES,
@@ -57,44 +33,9 @@ import {
 import { AutoRefresh } from "@/components/auto-refresh";
 import { RecentSessionsSection } from "@/components/recent-sessions-section";
 import { StackMatesSection } from "./stack-mates-section";
-import {
-  buildGranularSnapshotsByAccount,
-  buildTrackerObsByAccount,
-  mapOpenSessionsToRecentSessionRows,
-  mapSessionsToRecentSessionRows,
-} from "@/lib/recent-session-rows";
-import { serializePartyMatches } from "@/lib/party-matches";
-import { buildAllMatchesFromEdgesAndSegments } from "@/lib/party-matches-server";
 import { cn } from "@/lib/utils";
 
-export const revalidate = 60;
-export const dynamicParams = true;
-
-export async function generateStaticParams() {
-  return [];
-}
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const HOUR_OPTIONS: Record<string, number> = {
-  "24h": 24,
-  "3d": 72,
-  "7d": 168,
-  "14d": 336,
-  "30d": 720,
-};
-
-function toIso(d: Date | string): string {
-  return d instanceof Date ? d.toISOString() : String(d);
-}
-
-function toSnap(
-  score: number | null,
-  name: string | null,
-  division: string | null,
-): TSessionRankSnap {
-  return { rankScore: score, rankName: name, rankDivision: division };
-}
 
 function platformLabel(platform: string): string {
   const v = platform.toLowerCase();
@@ -110,10 +51,9 @@ function isOfflineLikeStateLabel(text: string | null | undefined): boolean {
   return ["offline", "afk", "disconnected", "not online"].some((frag) => t.includes(frag));
 }
 
-/** Subtitle for offline card: aligned with evaluateRealtimePresence (15m freshness + derived status). */
 function offlinePresenceSubtitle(
   evaluation: TPresenceEvaluation,
-  realtimeUpdatedAt: Date | string | null | undefined
+  realtimeUpdatedAt: string | null | undefined
 ): { titleSuffix: string | null; description: string } {
   if (!realtimeUpdatedAt) {
     return {
@@ -122,7 +62,7 @@ function offlinePresenceSubtitle(
         "No realtime timestamp on file — we cannot show a live window until the next presence sync.",
     };
   }
-  const rel = formatRelativeTime(toIso(realtimeUpdatedAt));
+  const rel = formatRelativeTime(realtimeUpdatedAt);
   if (!evaluation.isFresh) {
     return {
       titleSuffix: `· Last realtime ${rel}`,
@@ -153,160 +93,34 @@ export default async function PlayerProfilePage(props: {
     notFound();
   }
 
-  const rangeKey = "7d";
-  const hours = HOUR_OPTIONS[rangeKey];
+  const pageData = await cacheRead(
+    CacheKeys.playerPage(trackedAccountId),
+    () => loadPlayerPage(trackedAccountId),
+  );
 
-  const account = await getTrackedAccountById(trackedAccountId);
-  if (!account) {
+  if (!pageData) {
     notFound();
   }
+
+  const { account, initialRangePayload, openSession, recentSessionRows, matches } = pageData;
 
   const lastSeenLegendIconUrl = account.realtimeSelectedLegend
     ? getLegendIconUrl(account.realtimeSelectedLegend)
     : null;
-  const presenceEval = evaluateRealtimePresence({
-    realtimeUpdatedAt: account.realtimeUpdatedAt ? toIso(account.realtimeUpdatedAt) : null,
+  const evaluation = evaluateRealtimePresence({
+    realtimeUpdatedAt: account.realtimeUpdatedAt,
     realtimeIsOnline: account.realtimeIsOnline,
     realtimeIsInGame: account.realtimeIsInGame,
     realtimeCurrentState: account.realtimeCurrentState,
     realtimeCurrentStateAsText: account.realtimeCurrentStateAsText,
   });
-  const isOnlineForLegend = presenceEval.shouldShow;
-
-  const [
-    timelineRaw,
-    recentSessions,
-    openSessionSummaries,
-    legendAggregates,
-    mapAggregates,
-    mapLegendAggregates,
-    careerDeltas,
-    trackerDeltas,
-    hasTrackerObservations,
-    stackCompositions,
-    baselineAvgRp,
-    bestStackByMap,
-    recentGamesByAccount,
-  ] = await Promise.all([
-    getRankTimelineByTrackedAccountId(trackedAccountId, hours),
-    getRecentCompletedSessionsByAccount(trackedAccountId, 30),
-    getOpenSessionSummariesForTrackedAccountIds([trackedAccountId]),
-    getLegendAggregatesByAccount(trackedAccountId, hours),
-    getMapAggregatesByAccount(trackedAccountId, hours),
-    getMapLegendAggregatesByAccount(trackedAccountId, hours),
-    getCareerStatDeltasForTrackedAccount(trackedAccountId, hours),
-    getTrackerStatDeltasForTrackedAccount(trackedAccountId, hours),
-    hasAnyTrackerObservations(trackedAccountId),
-    getStackCompositions(trackedAccountId, hours),
-    getBaselineAvgRp(trackedAccountId, hours),
-    getBestStackByMap(trackedAccountId, hours),
-    getRecentGamesByTrackedAccountIds(
-      [trackedAccountId],
-      RECENT_MATCH_GAMES_LIMIT,
-    ),
-  ]);
-
-  const recentMatchGames = (recentGamesByAccount[trackedAccountId] ?? []).map(
-    (cell) => ({
-      ...cell,
-      startedAt: toIso(cell.startedAt),
-      endedAt: toIso(cell.endedAt),
-    }),
-  );
-
-  const displayLegend = resolveProfileDisplayLegendName({
-    isOnline: isOnlineForLegend,
-    lastSeenLegendIconUrl,
-    realtimeSelectedLegend: account.realtimeSelectedLegend,
-    legendAggregates,
-  });
-
-  const trackerSnapshot = await getLatestTrackerSnapshotForLegend(
-    trackedAccountId,
-    displayLegend ?? "",
-  );
-
-  const timelinePoints = timelineRaw.map((p) => ({
-    capturedAt: toIso(p.capturedAt),
-    rankScore: p.rankScore,
-  }));
-
-  const trackerRows = buildTrackerRowsForProfile(trackerSnapshot, trackerDeltas, displayLegend);
-
-  const initialRangePayload: TProfileRangePayload = {
-    rangeKey,
-    timelinePoints,
-    legendAggregates,
-    mapAggregates,
-    mapLegendAggregates,
-    careerDeltas,
-    trackerRows,
-    selectedLegend: displayLegend,
-    hasTrackerObservations,
-    legacyApiSummary: {
-      kills: account.careerKills,
-      damage: account.careerDamage,
-      wins: account.careerWins,
-    },
-    stackCompositions,
-    baselineAvgRp,
-    bestStackByMap,
-    recentMatchGames,
-  };
-
-  const openSession = openSessionSummaries[0] ?? null;
-
-  const sessionIds = [
-    ...new Set([
-      ...recentSessions.map((r) => r.sessionId),
-      ...openSessionSummaries.map((o) => o.sessionId),
-    ]),
-  ];
-
-  const [segmentsBySession, granularSnapshotsByAccount, matchEdges] = await Promise.all([
-    getSegmentsBySessionIds(sessionIds),
-    buildGranularSnapshotsByAccount(recentSessions),
-    getPartyMatchEdgesByAccount(trackedAccountId, 300),
-  ]);
-
-  const trackerObsByAccount = await buildTrackerObsByAccount(segmentsBySession);
-
-  const completedSessionRows = mapSessionsToRecentSessionRows(
-    recentSessions,
-    segmentsBySession,
-    granularSnapshotsByAccount,
-    trackerObsByAccount
-  );
-  const accountByTrackedId = new Map([
-    [trackedAccountId, { ign: account.ign, platform: account.platform }],
-  ]);
-  const activeSessionRows = await mapOpenSessionsToRecentSessionRows(
-    openSessionSummaries,
-    accountByTrackedId,
-    segmentsBySession,
-    trackerObsByAccount
-  );
-  const recentSessionRows = [...activeSessionRows, ...completedSessionRows];
-  const allSegments = Object.values(segmentsBySession).flat();
-  const ignByTrackedAccountId = new Map([[trackedAccountId, account.ign]]);
-  const matches = serializePartyMatches(
-    buildAllMatchesFromEdgesAndSegments(
-      matchEdges,
-      allSegments,
-      ignByTrackedAccountId,
-    ),
-  );
-
-  const lastSeenLegendUrl = lastSeenLegendIconUrl;
-
-  const nowMs = Date.now();
-  const evaluation = presenceEval;
-  const isOnline = isOnlineForLegend;
+  const isOnline = evaluation.shouldShow;
   const isInGame = evaluation.status === "in_game";
 
   const sessionRpDelta = openSession
     ? computeRankScoreDelta(openSession.openingRankScore, openSession.latestRankScore)
     : null;
+  const nowMs = Date.now();
   const elapsedMs = openSession
     ? Math.max(0, nowMs - new Date(openSession.startedAt).getTime())
     : 0;
@@ -341,7 +155,7 @@ export default async function PlayerProfilePage(props: {
         <div className="flex items-center gap-3">
           <span className="text-muted-foreground text-xs">
             {account.lastCheckedAt
-              ? `Synced ${formatRelativeTime(toIso(account.lastCheckedAt))}`
+              ? `Synced ${formatRelativeTime(account.lastCheckedAt)}`
               : "Never synced"}
           </span>
           <PlayerProfileRangePicker />
@@ -354,7 +168,7 @@ export default async function PlayerProfilePage(props: {
         <div className="relative isolate flex min-h-[400px] flex-col overflow-hidden rounded-lg border md:h-full md:min-h-0">
           <PlayerProfileHeroImage
             isOnline={isOnline}
-            lastSeenLegendUrl={lastSeenLegendUrl}
+            lastSeenLegendUrl={lastSeenLegendIconUrl}
             currentRankIconUrl={getRankIconUrl(account.currentRankName, account.currentRankDivision)}
             alt={account.realtimeSelectedLegend ?? account.ign}
           />

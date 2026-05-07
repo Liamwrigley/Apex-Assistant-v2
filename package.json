@@ -7,8 +7,8 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build -w @apex-assistant/core && npm run build -w @apex-assistant/db && npm run build -w @apex-assistant/web -w @apex-assistant/worker -w @apex-assistant/discord-bot --if-present",
-    "build:packages": "npm run build -w @apex-assistant/core && npm run build -w @apex-assistant/db",
+    "build": "npm run build -w @apex-assistant/core && npm run build -w @apex-assistant/db && npm run build -w @apex-assistant/cache && npm run build -w @apex-assistant/web -w @apex-assistant/worker -w @apex-assistant/discord-bot --if-present",
+    "build:packages": "npm run build -w @apex-assistant/core && npm run build -w @apex-assistant/db && npm run build -w @apex-assistant/cache",
     "build:web": "npm run build:packages && npm run build -w @apex-assistant/web",
     "build:worker": "npm run build:packages && npm run build -w @apex-assistant/worker",
     "build:discord": "npm run build:packages && npm run build -w @apex-assistant/discord-bot",

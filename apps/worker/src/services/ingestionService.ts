@@ -7,6 +7,11 @@ import {
   type TTrackedAccount
 } from "@apex-assistant/core";
 import {
+  cacheInvalidate,
+  CacheKeys,
+  playerInvalidationKeys,
+} from "@apex-assistant/cache";
+import {
   autoLinkTrackedAccountByExactFingerprint,
   claimNextDueTrackedAccount,
   getLatestRankScoreForAccount,
@@ -155,7 +160,7 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
     });
     const prevPresence = derivePresenceFromRealtimeFields(toRealtimePresenceFieldsFromTrackedAccount(account));
     const nextPresence = derivePresenceFromRealtimeFields(toRealtimePresenceFieldsFromRankRealtime(rank.realtime));
-    await syncPlaySessionIngest({
+    const sessionResult = await syncPlaySessionIngest({
       trackedAccountId: account.id,
       prevActive: prevPresence.shouldShow,
       nextActive: nextPresence.shouldShow,
@@ -166,7 +171,7 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       rankIconUrl: rank.iconUrl ?? null,
       selectedLegend: rank.realtime?.selectedLegend ?? null
     });
-    await insertPresenceSnapshotIfChanged({
+    const presenceSnapshot = await insertPresenceSnapshotIfChanged({
       trackedAccountId: account.id,
       selectedLegend: rank.realtime?.selectedLegend ?? null,
       isInGame: nextPresence.status === "in_game",
@@ -215,9 +220,37 @@ export async function ingestTrackedAccount(account: TTrackedAccount): Promise<vo
       actorUserId: account.ownerUserId
     });
     await updateTrackedAccountLastCheckedAt(account.id);
+
+    const presenceChanged = presenceSnapshot !== null;
+    const sessionChanged = sessionResult.sessionChanged;
+    const anythingChanged = scoreChanged || presenceChanged || sessionChanged;
+
+    if (anythingChanged) {
+      const keysToInvalidate: string[] = [
+        CacheKeys.dashboardLive(account.guildId),
+        CacheKeys.tracked(account.guildId),
+      ];
+
+      if (scoreChanged) {
+        keysToInvalidate.push(
+          CacheKeys.leaderboard(account.guildId),
+          CacheKeys.lbTimelines(account.guildId),
+          CacheKeys.stats24h(account.guildId),
+          CacheKeys.dashboardStatic(account.guildId),
+          ...playerInvalidationKeys(account.id),
+        );
+      }
+
+      if (sessionChanged) {
+        keysToInvalidate.push(CacheKeys.dashboardStatic(account.guildId));
+      }
+
+      await cacheInvalidate(...keysToInvalidate);
+    }
+
     recordProviderHealth(statsProvider.name, true);
     console.log(
-      `[worker] player sync ok guild=${account.guildId} account=${account.id} player=${account.ign} platform=${account.platform} source=${statsProvider.name} elapsed_ms=${Date.now() - startedAt}`
+      `[worker] player sync ok guild=${account.guildId} account=${account.id} player=${account.ign} platform=${account.platform} source=${statsProvider.name} elapsed_ms=${Date.now() - startedAt} cache_invalidated=${anythingChanged}`
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

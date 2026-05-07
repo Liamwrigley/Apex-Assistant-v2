@@ -1,3 +1,4 @@
+import { cacheInvalidate, CacheKeys } from "@apex-assistant/cache";
 import { pool, upsertPartyEdge } from "@apex-assistant/db";
 
 const debugLogs = (process.env.DEBUG_LOGS ?? "false").toLowerCase() === "true";
@@ -466,6 +467,14 @@ export async function correlateRecentSegments(sinceMs = 30 * 60 * 1000): Promise
       b: c.segB.segmentId.slice(0, 8),
       score: c.score,
     });
+  }
+
+  if (edgesCreated > 0) {
+    const affectedGuildIds = [...new Set(segments.map((s) => s.guildId))];
+    const keysToInvalidate = affectedGuildIds.map((gid) =>
+      CacheKeys.dashboardStatic(gid),
+    );
+    await cacheInvalidate(...keysToInvalidate);
   }
 
   log("correlation complete", { edgesCreated, candidatesScored: candidates.length });

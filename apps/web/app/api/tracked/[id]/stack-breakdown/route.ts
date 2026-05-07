@@ -1,4 +1,5 @@
 import { getStackCompositionBreakdown } from "@apex-assistant/db";
+import { cacheRead, CacheKeys } from "@apex-assistant/cache";
 import { NextResponse } from "next/server";
 import { toApiError } from "@/app/api/_lib/responses";
 
@@ -35,7 +36,11 @@ export async function GET(request: Request, context: TParams): Promise<NextRespo
     const rangeKey = url.searchParams.get("range") ?? "7d";
     const hours = HOUR_OPTIONS[rangeKey] ?? 168;
 
-    const breakdown = await getStackCompositionBreakdown(id, teammateIds, hours);
+    const mateKey = teammateIds.sort().join(",");
+    const breakdown = await cacheRead(
+      CacheKeys.stackBreakdown(id, mateKey),
+      () => getStackCompositionBreakdown(id, teammateIds, hours),
+    );
 
     return NextResponse.json({ breakdown });
   } catch (error) {
