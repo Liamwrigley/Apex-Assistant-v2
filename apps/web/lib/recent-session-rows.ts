@@ -197,6 +197,21 @@ export function mapSessionsToRecentSessionRows(
   }));
 }
 
+/**
+ * Lightweight rows for list views: sparkline is just the open/close fallback
+ * and tracker deltas are empty. The detail modal loads the full row from
+ * `/api/sessions/[sessionId]` when opened.
+ */
+export function mapSessionsToDeferredRecentSessionRows(
+  sessions: TRecentCompletedSessionRow[],
+  segmentsBySession: Record<string, TInferredGameSegment[]>
+): TRecentSessionRow[] {
+  return mapSessionsToRecentSessionRows(sessions, segmentsBySession, {}).map((row) => ({
+    ...row,
+    detailDeferred: true,
+  }));
+}
+
 export async function mapOpenSessionsToRecentSessionRows(
   openSessions: TOpenSessionSummary[],
   accountByTrackedId: Map<string, { ign: string; platform: string }>,

@@ -3,16 +3,11 @@ import { DashboardClient } from "@/components/dashboard-client";
 import type { TRecentSessionRow } from "@/components/recent-sessions-section";
 import { computeDashboardLive } from "@/lib/dashboard-live";
 import {
-  clusterMatchesFromEdges,
   serializePartyMatches,
   type TPartyMatchSerialized,
 } from "@/lib/party-matches";
 import { buildAllMatchesFromEdgesAndSegments } from "@/lib/party-matches-server";
-import {
-  buildGranularSnapshotsByAccount,
-  buildTrackerObsByAccount,
-  mapSessionsToRecentSessionRows,
-} from "@/lib/recent-session-rows";
+import { mapSessionsToDeferredRecentSessionRows } from "@/lib/recent-session-rows";
 import {
   getPartyMatchEdges,
   getRankTimelinesByTrackedAccountIds,
@@ -20,6 +15,9 @@ import {
   getSegmentsBySessionIds,
   listTrackedAccounts,
 } from "@apex-assistant/db";
+/** ISR: live cards refetch `/api/dashboard-live` on mount, so a cached shell is fine. */
+export const revalidate = 60;
+
 const debugLogs = (process.env.DEBUG_LOGS ?? "false").toLowerCase() === "true";
 
 function pageLog(message: string, meta?: Record<string, unknown>) {
@@ -70,7 +68,6 @@ function toIso(d: Date | string): string {
  */
 async function loadDashboardStatic(guildFilter: string | undefined): Promise<{
   timelines: Record<string, Array<{ capturedAt: string; rankScore: number }>>;
-  partyMatches: TPartyMatchSerialized[];
   matches: TPartyMatchSerialized[];
   completedRecentSessions: TRecentSessionRow[];
   trackedByOwner: Record<string, TTrackedOwnerRow[]>;
@@ -89,9 +86,10 @@ async function loadDashboardStatic(guildFilter: string | undefined): Promise<{
     ...new Set([...allTrackedAccountIds, ...recentSessionAccountIds]),
   ];
 
-  const [timelinesRaw, granularSnapshotsByAccount] = await Promise.all([
+  const sessionIds = [...new Set(recentSessionsRaw.map((r) => r.sessionId))];
+  const [timelinesRaw, segmentsBySession] = await Promise.all([
     getRankTimelinesByTrackedAccountIds(timelineAccountIds, 168),
-    buildGranularSnapshotsByAccount(recentSessionsRaw),
+    getSegmentsBySessionIds(sessionIds),
   ]);
 
   const timelines: Record<
@@ -105,32 +103,24 @@ async function loadDashboardStatic(guildFilter: string | undefined): Promise<{
     }));
   }
 
-  const sessionIds = [...new Set(recentSessionsRaw.map((r) => r.sessionId))];
-  const segmentsBySession = await getSegmentsBySessionIds(sessionIds);
-  const trackerObsByAccount = await buildTrackerObsByAccount(segmentsBySession);
-
-  const completedRecentSessions = mapSessionsToRecentSessionRows(
+  // Sparklines and tracker deltas are loaded per session when the detail modal opens.
+  const completedRecentSessions = mapSessionsToDeferredRecentSessionRows(
     recentSessionsRaw,
     segmentsBySession,
-    granularSnapshotsByAccount,
-    trackerObsByAccount,
-  );
-
-  const partyMatches = serializePartyMatches(
-    clusterMatchesFromEdges(matchEdges),
   );
 
   const ignByTrackedAccountId = new Map(
     trackedAccounts.map((a) => [a.id, a.ign]),
   );
   const allSegments = Object.values(segmentsBySession).flat();
+  // Edge evidence is only shown on /debug/party; drop it to keep the payload small.
   const matches = serializePartyMatches(
     buildAllMatchesFromEdgesAndSegments(
       matchEdges,
       allSegments,
       ignByTrackedAccountId,
     ),
-  );
+  ).map((m) => ({ ...m, edges: [] }));
 
   const tracked: TTrackedOwnerRow[] = trackedAccounts.map((row) => ({
     id: row.id,
@@ -174,7 +164,6 @@ async function loadDashboardStatic(guildFilter: string | undefined): Promise<{
 
   return {
     timelines,
-    partyMatches,
     matches,
     completedRecentSessions,
     trackedByOwner,
@@ -209,7 +198,6 @@ export default async function HomePage() {
       guildId={guildFilter}
       initialLive={initialLive}
       timelines={staticData.timelines}
-      partyMatches={staticData.partyMatches}
       matches={staticData.matches}
       completedRecentSessions={staticData.completedRecentSessions}
       trackedByOwner={staticData.trackedByOwner}

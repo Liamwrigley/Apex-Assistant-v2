@@ -7,7 +7,10 @@ function getRedis(): Redis | null {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) return null;
-  redisInstance = new Redis({ url, token });
+  // Upstash defaults to `cache: "no-store"`, which makes Next render any page
+  // that reads Redis dynamically. "default" lets ISR pages stay static while
+  // Next still treats each Redis call as uncached at runtime.
+  redisInstance = new Redis({ url, token, cache: "default" });
   return redisInstance;
 }
 

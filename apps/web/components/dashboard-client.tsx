@@ -50,11 +50,10 @@ export type TDashboardClientProps = {
   guildId?: string;
   initialLive: TDashboardLivePayload;
   timelines: Record<string, TTimelinePoint[]>;
-  /** Party-only match clusters used by the leaderboard match-cell highlighter. */
-  partyMatches: TPartyMatchSerialized[];
   /**
    * All matches (party clusters + solo segments) used by the match history
-   * card. Sorted newest first.
+   * card and, filtered to party clusters, by the leaderboard match-cell
+   * highlighter. Sorted newest first.
    */
   matches: TPartyMatchSerialized[];
   /** Completed sessions from SSR. Live active sessions are merged in on top. */
@@ -80,6 +79,11 @@ export function DashboardClient(props: TDashboardClientProps) {
   const recentSessions = useMemo(
     () => [...live.activeRecentSessions, ...props.completedRecentSessions],
     [live.activeRecentSessions, props.completedRecentSessions],
+  );
+
+  const partyMatches = useMemo(
+    () => props.matches.filter((m) => m.players.length > 1),
+    [props.matches],
   );
 
   const presenceData = useMemo(
@@ -233,7 +237,7 @@ export function DashboardClient(props: TDashboardClientProps) {
         timelines={props.timelines}
         trackedCount={live.tracked.length}
         recentGamesByTrackedAccountId={live.recentGamesByTrackedAccountId}
-        partyMatches={props.partyMatches}
+        partyMatches={partyMatches}
       />
 
       <LivePresenceSection data={presenceData} />

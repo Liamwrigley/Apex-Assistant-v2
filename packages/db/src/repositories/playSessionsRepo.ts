@@ -376,6 +376,20 @@ export async function getRecentCompletedSessions(limit = 20): Promise<TRecentCom
   return mapSessionsWithLegends(sessions.rows);
 }
 
+/** One completed session by id, or `null` if it doesn't exist or isn't listed as completed. */
+export async function getCompletedSessionById(
+  sessionId: string
+): Promise<TRecentCompletedSessionRow | null> {
+  const sessions = await pool.query<TCompletedSessionRow>(
+    `${completedSessionsBaseSql}
+    and ps.id = $1::uuid
+    `,
+    [sessionId]
+  );
+  const [row] = await mapSessionsWithLegends(sessions.rows);
+  return row ?? null;
+}
+
 export async function getRecentCompletedSessionsByGuild(
   guildId: string,
   limit = 20

@@ -44,4 +44,6 @@ export type TRecentSessionRow = {
   /** Rank snapshots within the session window (plus open/close fallback). */
   rankSparklinePoints: Array<{ capturedAt: string; rankScore: number }>;
   estimatedGames?: TEstimatedGame[];
+  /** Sparkline and tracker deltas were left out; fetch `/api/sessions/[sessionId]` for them. */
+  detailDeferred?: boolean;
 };

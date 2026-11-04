@@ -1,7 +1,7 @@
 "use client";
 
 import { PendingLink } from "@/components/pending-link";
-import { formatRelativeTime } from "@/lib/format-relative-time";
+import { LocalDateTime, RelativeTime } from "@/components/client-time";
 import { getRankIconUrl, RANK_ICON_FALLBACK } from "@/lib/rank-icon-url";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -210,15 +210,14 @@ export function TrackedAccountsOwnerTable(props: {
                       {row.externalPlayerId ?? "-"}
                     </td>
                     <td className="px-2 py-2 whitespace-nowrap">
-                      {new Date(row.createdAt).toLocaleString()}
+                      <LocalDateTime iso={row.createdAt} />
                     </td>
                     <td className="px-2 py-2 text-right whitespace-nowrap">
                       {row.lastCheckedAt ? (
-                        <span
+                        <RelativeTime
+                          iso={row.lastCheckedAt}
                           title={new Date(row.lastCheckedAt).toLocaleString()}
-                        >
-                          {formatRelativeTime(row.lastCheckedAt)}
-                        </span>
+                        />
                       ) : (
                         "Never"
                       )}

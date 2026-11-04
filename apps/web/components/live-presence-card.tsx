@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PendingLink } from "@/components/pending-link";
+import { useHydrated } from "@/hooks/use-hydrated";
 import {
   computeRankScoreDelta,
   RpDeltaBadge,
@@ -102,6 +103,7 @@ export function LivePresenceCard(props: {
   session: TLivePresenceSessionProps;
 }) {
   const { row, session } = props;
+  const hydrated = useHydrated();
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 15_000);
@@ -126,6 +128,7 @@ export function LivePresenceCard(props: {
       ? nowMs - new Date(session.gameStartedAt).getTime()
       : null;
   const gameElapsedLabel =
+    hydrated &&
     gameElapsedMs !== null &&
     gameElapsedMs > 0 &&
     gameElapsedMs < 24 * 60 * 60 * 1000
@@ -213,7 +216,7 @@ export function LivePresenceCard(props: {
                   Session
                 </span>
                 <span className="text-muted-foreground tabular-nums text-[11px]">
-                  {formatDurationMs(elapsedMs)}
+                  {hydrated ? formatDurationMs(elapsedMs) : " "}
                 </span>
               </div>
 
