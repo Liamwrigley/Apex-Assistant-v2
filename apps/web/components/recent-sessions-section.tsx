@@ -31,7 +31,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatDurationMs } from "@/lib/format-duration";
-import { formatRelativeTime } from "@/lib/format-relative-time";
+import { RelativeTime } from "@/components/client-time";
+import { useHydrated } from "@/hooks/use-hydrated";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
 import type { TPartyMatchSerialized } from "@/lib/party-matches";
 import { cn } from "@/lib/utils";
@@ -141,6 +142,7 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
   const [view, setView] = useState<TView>("sessions");
   const [matchFilter, setMatchFilter] = useState<TMatchFilter>("party");
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT);
+  const hydrated = useHydrated();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     null,
   );
@@ -518,7 +520,9 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
                           )}
                         </td>
                         <td className="text-muted-foreground px-2 py-2 align-middle text-xs tabular-nums">
-                          {formatDurationMs(durationMs)}
+                          {row.endedAt != null || hydrated
+                            ? formatDurationMs(durationMs)
+                            : " "}
                         </td>
                         <td className="text-muted-foreground px-2 py-2 text-right align-middle text-xs">
                           {row.isActiveSession ? (
@@ -530,7 +534,7 @@ export function RecentSessionsSection(props: RecentSessionsSectionProps) {
                               In progress
                             </span>
                           ) : row.endedAt ? (
-                            <>{formatRelativeTime(row.endedAt)}</>
+                            <RelativeTime iso={row.endedAt} />
                           ) : (
                             "—"
                           )}

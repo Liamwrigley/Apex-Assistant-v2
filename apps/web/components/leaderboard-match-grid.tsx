@@ -1,7 +1,7 @@
 "use client";
 
 import type { TDashboardLiveRecentGameCell } from "@/lib/dashboard-live";
-import { formatRelativeTime } from "@/lib/format-relative-time";
+import { RelativeTime } from "@/components/client-time";
 import { getLegendIconUrl } from "@/lib/legend-icon-url";
 import { cn } from "@/lib/utils";
 
@@ -220,7 +220,7 @@ function MatchGridTooltip(props: {
       <div className="text-muted-foreground mt-0.5 flex items-center gap-1.5">
         <span>{cell.mapName ?? "—"}</span>
         <span aria-hidden>·</span>
-        <span>{formatRelativeTime(cell.endedAt)}</span>
+        <RelativeTime iso={cell.endedAt} />
       </div>
     </div>
   );

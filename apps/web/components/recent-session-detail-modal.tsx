@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { LeaderboardMatchGrid } from "@/components/leaderboard-match-grid";
 import { PlayerTimelineSparkline } from "@/components/player-timeline-sparkline";
 import { RpDeltaBadge } from "@/components/rp-delta-badge";
@@ -64,8 +65,24 @@ const EMPTY_HIGHLIGHTS: ReadonlySet<string> = new Set();
 
 type TSessionRpViewMode = "line" | "grid";
 
+async function fetchSessionDetail(sessionId: string): Promise<TRecentSessionRow> {
+  const res = await fetch(`/api/sessions/${sessionId}`);
+  if (!res.ok) {
+    throw new Error(`Session detail fetch failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export function RecentSessionDetailModalBody(props: { row: TRecentSessionRow }) {
-  const { row } = props;
+  /** List rows ship without the sparkline and tracker deltas; load them on open
+   *  and fall back to the list row (open/close line) if the fetch fails. */
+  const { data: detail, isLoading: detailLoading } = useQuery({
+    queryKey: ["session-detail", props.row.sessionId],
+    queryFn: () => fetchSessionDetail(props.row.sessionId),
+    enabled: props.row.detailDeferred === true,
+    staleTime: Infinity,
+  });
+  const row = detail ?? props.row;
   const segments = estimatedToSegments(row.estimatedGames);
   const legendRp = aggregateRpByLegend(row.estimatedGames ?? []);
   const maps = uniqueMapsFromGames(row.estimatedGames ?? []);
@@ -108,7 +125,9 @@ export function RecentSessionDetailModalBody(props: { row: TRecentSessionRow }) 
           </div>
           <div className="bg-muted/20 rounded-lg border border-border/50 p-3">
             {viewMode === "line" ? (
-              canShowLine ? (
+              detailLoading ? (
+                <div className="bg-muted/70 h-[220px] animate-pulse rounded-md" />
+              ) : canShowLine ? (
                 <PlayerTimelineSparkline
                   trackedAccountId={trackedAccountId}
                   points={row.rankSparklinePoints}
